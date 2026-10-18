@@ -37,7 +37,7 @@ PROMPT = """다음은 교회 청년부 설교 영상입니다. 영상을 듣고 
 
 def load_seen():
     if SEEN_FILE.exists():
-        return json.loads(SEEN_FILE.read_text(encoding="utf-8"))
+        return json.loads(SEEN_FILE.read_text(encoding="utf-8-sig"))
     return None
 
 
