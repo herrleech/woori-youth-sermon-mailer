@@ -63,7 +63,17 @@ export function decodeRef(key) {
 }
 
 export function refLabel(r) {
+  if (r.v1 === 1 && r.v2 === 999) return `${r.book.name} ${r.ch}장`;
   return `${r.book.name} ${r.ch}:${r.v1}${r.v2 ? "-" + r.v2 : ""}`;
+}
+
+/** 본문 입력칸용: '요3:16-18, 롬8:1' 또는 장 전체 '요3' / '시편 23편' -> ref key 배열 */
+export function parsePassage(str) {
+  const keys = findRefs(str || "").map((m) => m.ref);
+  if (keys.length) return keys;
+  const m = new RegExp(`^\\s*(${NAMES.map(esc).join("|")})\\s?(\\d{1,3})\\s?[장편]?\\s*$`).exec(str || "");
+  const b = m && NAME_MAP.get(m[1]);
+  return b && +m[2] >= 1 && +m[2] <= b.chapters ? [`${b.no}:${+m[2]}:1-999`] : [];
 }
 
 /** 텍스트 앞부분의 책 이름 -> 책 (예: '베드로전서 4장' / '벧전 4') */

@@ -126,3 +126,12 @@ body { background: linear-gradient(180deg, #e6f2ff 0%, var(--bg) 240px); backgro
 .sheet-body { box-shadow: 0 -6px 24px rgba(74,144,226,.2); }
 .toast { background: #3b6fb0; }
 .sync.ok { background: #5bc0de; }
+
+.passage-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.passage-input { flex: 1 1 220px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--ink); font: inherit; }
+.passage-input:focus { outline: 2px solid #a9cdf5; border-color: var(--accent); }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 0; background: var(--soft); color: var(--accent); padding: 4px 10px; border-radius: 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.chip:hover { background: #c6e0ff; }
+.hint { font-size: 13px; color: var(--muted); }

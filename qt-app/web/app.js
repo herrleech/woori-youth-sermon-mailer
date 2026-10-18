@@ -1,5 +1,5 @@
 import { getStore, isFirebase, newId } from "./store.js";
-import { BOOKS, findRefs, decodeRef, refLabel, bookOfText, parseFilter, DELIMS } from "./bible.js";
+import { BOOKS, findRefs, decodeRef, refLabel, bookOfText, parseFilter, parsePassage, DELIMS } from "./bible.js";
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $("#view");
@@ -284,12 +284,12 @@ function renderNotes() {
     <div id="n-count" class="count"></div><div id="n-list" class="cards list"></div>`;
   const draw = () => {
     const q = noteQ.trim().toLowerCase();
-    const rows = notes.filter((n) => !q || `${n.title} ${n.preview}`.toLowerCase().includes(q))
+    const rows = notes.filter((n) => !q || `${n.title} ${n.passage || ""} ${n.preview}`.toLowerCase().includes(q))
       .sort((a, b) => ts(b.updatedAt) - ts(a.updatedAt));
     $("#n-count").textContent = `${rows.length}개`;
     $("#n-list").innerHTML = rows.length ? rows.map((n) => `<a class="card" href="#/note/${n.id}">
       <div class="meta"><div class="date">${n.updatedAt ? new Date(ts(n.updatedAt)).toLocaleDateString("ko-KR") : ""}</div></div>
-      <div class="body"><h3>${esc(n.title || "제목 없음")}</h3><p class="sum">${esc(n.preview || "")}</p></div></a>`).join("")
+      <div class="body"><h3>${esc(n.title || "제목 없음")}</h3>${n.passage ? `<div class="ref">${esc(n.passage)}</div>` : ""}<p class="sum">${esc(n.preview || "")}</p></div></a>`).join("")
       : `<div class="empty">설교 메모가 없습니다. 새 메모를 만들어 보세요.</div>`;
   };
   $("#n-q").addEventListener("input", (e) => { noteQ = e.target.value; draw(); });
@@ -338,7 +338,11 @@ function renderNote(id) {
     <div class="page-head"><a class="btn small" href="#/notes">← 목록</a>
       <span id="n-state" class="savestate" style="margin-left:auto"></span>
       <button id="n-del" class="btn small ghost">삭제</button></div>
-    <input id="n-title" class="note-title" placeholder="설교 제목 / 본문 / 설교자" maxlength="200">
+    <input id="n-title" class="note-title" placeholder="설교 제목" maxlength="200">
+    <div class="passage-row">
+      <input id="n-passage" class="passage-input" placeholder="본문 (예: 요3:16-18 / 롬8 / 시편 23편)" maxlength="200">
+      <span id="n-chips" class="chips"></span>
+    </div>
     <div id="editor-wrap">
       <div id="toolbar">
         <span class="ql-formats">
@@ -354,7 +358,7 @@ function renderNote(id) {
     </div>
     <p class="count">팁: <b>요3:16</b> 처럼 입력하고 띄어쓰기하면 구절이 링크가 되어 새번역 본문을 팝업으로 볼 수 있어요. 줄 처음에 <b>1.</b> 또는 <b>-</b> 를 치면 목록이 됩니다.</p>`;
 
-  const stEl = $("#n-state"), titleEl = $("#n-title");
+  const stEl = $("#n-state"), titleEl = $("#n-title"), passEl = $("#n-passage"), chipsEl = $("#n-chips");
   const busy = (on) => { stEl.textContent = on ? "저장 중…" : "저장됨"; setSync(on ? "busy" : "ok"); };
 
   const quill = new Quill("#editor", {
@@ -417,7 +421,7 @@ function renderNote(id) {
     const delta = JSON.stringify(quill.getContents());
     busy(true);
     try {
-      await store.saveNote(id, { title: titleEl.value, delta, preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) });
+      await store.saveNote(id, { title: titleEl.value, passage: passEl.value, delta, preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) });
       lastJson = delta; dirty = false; busy(false);
     } catch (e) { stEl.textContent = "저장 실패: " + e.message; setSync("err"); }
   }, 800);
@@ -431,6 +435,22 @@ function renderNote(id) {
   });
   titleEl.addEventListener("input", touch);
 
+  // 본문 입력 → 칩 표시, 입력 확정(Enter/포커스 이동) 시 새번역 팝업
+  const drawChips = () => {
+    const keys = parsePassage(passEl.value);
+    chipsEl.innerHTML = keys.map((k) => `<button class="chip" data-ref="${k}">📖 ${esc(refLabel(decodeRef(k)))}</button>`).join("")
+      || (passEl.value.trim() ? `<span class="hint">인식된 구절이 없어요 (예: 요3:16)</span>` : "");
+    return keys;
+  };
+  let shown = "";
+  passEl.addEventListener("input", () => { drawChips(); touch(); });
+  passEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); passEl.blur(); } });
+  passEl.addEventListener("change", () => {
+    const keys = drawChips();
+    if (keys.length && passEl.value !== shown) { shown = passEl.value; openVerse(keys[0]); }
+  });
+  chipsEl.addEventListener("click", (e) => { const c = e.target.closest(".chip"); if (c) openVerse(c.dataset.ref); });
+
   // 구절 클릭 → 팝업
   quill.root.addEventListener("click", (e) => {
     const v = e.target.closest?.(".verse");
@@ -442,6 +462,7 @@ function renderNote(id) {
     const n = notes.find((x) => x.id === id);
     if (!n) return;
     if (n.title !== undefined && !dirty && document.activeElement !== titleEl) titleEl.value = n.title || "";
+    if (!dirty && document.activeElement !== passEl && passEl.value !== (n.passage || "")) { passEl.value = n.passage || ""; shown = passEl.value; drawChips(); }
     if (!n.delta || dirty || n.delta === lastJson) { current = n; return; }
     const sel = quill.getSelection();
     try { quill.setContents(JSON.parse(n.delta), "silent"); } catch { return; }
@@ -460,7 +481,7 @@ function renderNote(id) {
   };
   return () => {
     listeners.delete(pull);
-    if (dirty) { doSave.flush(); store.saveNote(id, { title: titleEl.value, delta: JSON.stringify(quill.getContents()), preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) }); }
+    if (dirty) { doSave.flush(); store.saveNote(id, { title: titleEl.value, passage: passEl.value, delta: JSON.stringify(quill.getContents()), preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) }); }
   };
 }
 
@@ -476,7 +497,7 @@ async function openVerse(key) {
   try {
     const verses = await store.getChapter(r.book.no, r.ch);
     if (!verses) { $("#sheet-text").textContent = "이 장의 새번역 본문이 아직 저장되어 있지 않습니다."; sheetPlain = ""; return; }
-    const end = Math.min(r.v2 || r.v1, r.v1 + 39);
+    const end = Math.min(r.v2 || r.v1, verses.length, r.v1 + 199);
     const parts = [];
     for (let v = r.v1; v <= end; v++) if (verses[v - 1]) parts.push([v, verses[v - 1]]);
     if (!parts.length) { $("#sheet-text").textContent = `${r.ch}장에는 ${r.v1}절이 없습니다.`; sheetPlain = ""; return; }
