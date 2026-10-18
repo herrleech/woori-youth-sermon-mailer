@@ -45,21 +45,51 @@ def save_seen(seen):
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=1), encoding="utf-8")
 
 
-def fetch_feed():
-    """유튜브 RSS는 가끔 404/500을 내므로 두 주소를 번갈아 여러 번 시도한다. 실패하면 None."""
+def video(vid, title, published, description):
+    return {"id": vid, "url": f"https://www.youtube.com/watch?v={vid}", "title": html.unescape(title),
+            "published": datetime.fromisoformat(published.replace("Z", "+00:00")), "description": description}
+
+
+def fetch_via_api(key):
+    """YouTube Data API(공식). 클라우드 서버에서도 안정적으로 동작한다."""
+    r = requests.get(
+        "https://www.googleapis.com/youtube/v3/playlistItems",
+        params={"part": "snippet,contentDetails", "playlistId": f"UU{CHANNEL_ID[2:]}",
+                "maxResults": 20, "key": key},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return [video(i["contentDetails"]["videoId"], i["snippet"]["title"],
+                  i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
+                  i["snippet"].get("description", ""))
+            for i in r.json()["items"]]
+
+
+def fetch_via_rss():
+    """RSS는 가끔 404/500을 내고 클라우드 IP는 막히기도 해서 여러 번 시도한다."""
     urls = [FEED_URL, UPLOADS_FEED_URL]
     for attempt in range(8):
-        url = urls[attempt % 2]
         try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+            r = requests.get(urls[attempt % 2], headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
             r.raise_for_status()
             entries = feedparser.parse(r.content).entries
             if entries:
-                return entries
+                return [video(e.yt_videoid, e.title, e.published, e.get("summary", "")) for e in entries]
         except requests.RequestException as e:
             print(f"피드 재시도 {attempt + 1}: {e}", file=sys.stderr)
         time.sleep(4 * (attempt + 1))
     return None
+
+
+def fetch_videos():
+    """최신순 영상 목록. 실패하면 None."""
+    key = os.environ.get("YOUTUBE_API_KEY")
+    if key:
+        try:
+            return fetch_via_api(key)
+        except (requests.RequestException, KeyError) as e:
+            print(f"YouTube API 실패: {type(e).__name__}", file=sys.stderr)
+    return fetch_via_rss()
 
 
 def is_sermon(title):
@@ -143,37 +173,34 @@ def send_mail(subject, body_html, body_text):
 
 
 def main():
-    entries = fetch_feed()
-    if entries is None:  # 일시적 피드 장애: 실패로 처리하지 않고 다음 실행(30분 뒤)에 재시도
-        print("유튜브 피드를 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
+    videos = fetch_videos()
+    if videos is None:  # 일시적 장애: 실패로 처리하지 않고 다음 실행(30분 뒤)에 재시도
+        print("유튜브 영상 목록을 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
         return
     seen = load_seen()
 
     if seen is None:  # 첫 실행: 과거 영상은 보내지 않고 기록만 한다
-        save_seen({e.yt_videoid for e in entries})
-        print(f"첫 실행: 기존 영상 {len(entries)}개를 기록만 했습니다.")
+        save_seen({v["id"] for v in videos})
+        print(f"첫 실행: 기존 영상 {len(videos)}개를 기록만 했습니다.")
         return
     seen = set(seen)
 
     now = datetime.now(timezone.utc)
-    new = [e for e in reversed(entries) if e.yt_videoid not in seen]
-    for e in new:
-        vid, url = e.yt_videoid, e.link
-        title = html.unescape(e.title)
+    kst = timezone(timedelta(hours=9))
+    for v in [v for v in reversed(videos) if v["id"] not in seen]:
+        vid, url, title, published = v["id"], v["url"], v["title"], v["published"]
         if not is_sermon(title):
             print(f"설교 아님, 건너뜀: {title}")
             seen.add(vid)
             continue
-        published = datetime.fromisoformat(e.published)
-        description = e.get("summary", "")
-        info = summarize(vid, url, title, description)
+        info = summarize(vid, url, title, v["description"])
         if info is None:
             if now - published < GIVE_UP_AFTER:
                 print(f"요약 실패, 다음 실행에서 재시도: {title}")
                 continue
             info = {"title": title, "scripture": "-", "preacher": "-",
                     "summary": "요약을 만들지 못했습니다. 영상 링크에서 확인해주세요.", "takeaways": []}
-        body_html, body_text = render_email(info, url, published.astimezone().strftime("%Y-%m-%d %H:%M"))
+        body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"))
         send_mail(f"[청년교구 새 설교] {info.get('title', title)}", body_html, body_text)
         print(f"발송 완료: {title}")
         seen.add(vid)
