@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f4f4f">
+<title>한 구절 묵상</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <h1>한 구절 묵상</h1>
+  <p>나만의 QT 라이브러리</p>
+  <button id="btn-login" class="btn primary">Google로 로그인</button>
+</div>
+<div id="app" hidden>
+  <header class="top">
+    <a class="brand" href="#/">한 구절 묵상</a>
+    <nav>
+      <a href="#/" data-nav="home">QT</a>
+      <a href="#/notes" data-nav="notes">설교 메모</a>
+    </nav>
+    <span id="sync" class="sync" title="동기화 상태"></span>
+    <button id="btn-logout" class="btn ghost small" title="로그아웃">⎋</button>
+  </header>
+  <main id="view"></main>
+</div>
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-body">
+    <div class="sheet-head"><strong id="sheet-title"></strong><button id="sheet-close" class="btn ghost small">닫기</button></div>
+    <div id="sheet-text" class="sheet-text"></div>
+    <div class="sheet-actions"><button id="sheet-copy" class="btn small">복사</button></div>
+  </div>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

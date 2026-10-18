@@ -1,0 +1,14 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function owner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email == 'herrleech.interpretation@gmail.com';
+    }
+    match /users/{uid}/{allPaths=**} {
+      allow read, delete: if owner(uid);
+      allow write: if owner(uid) && request.resource.size < 50 * 1024 * 1024;
+    }
+  }
+}

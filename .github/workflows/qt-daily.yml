@@ -1,0 +1,33 @@
+name: qt-daily
+
+on:
+  schedule:
+    - cron: "0 21 * * *"   # UTC 21:00 = KST 06:00 (GitHub 사정으로 수 분~20분 지연될 수 있음)
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "과거 N일 채우기 (0이면 오늘만)"
+        default: "0"
+
+concurrency:
+  group: qt-daily
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: qt-app/scraper/requirements.txt
+      - run: pip install -r qt-app/scraper/requirements.txt
+      - name: Fetch QT into Firestore
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          N="${{ github.event.inputs.backfill || '0' }}"
+          python qt-app/scraper/fetch_qt.py --backfill "$N"

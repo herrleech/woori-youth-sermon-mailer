@@ -1,0 +1,24 @@
+name: import-bible
+
+on:
+  workflow_dispatch:   # 수동 1회 실행 (새번역 전체를 내 Firestore에 저장, 이어하기 가능)
+
+concurrency:
+  group: import-bible
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: qt-app/scraper/requirements.txt
+      - run: pip install -r qt-app/scraper/requirements.txt
+      - env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python qt-app/scraper/import_bible.py

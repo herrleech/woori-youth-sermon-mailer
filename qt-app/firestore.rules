@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 본인 구글 계정만 허용 (이메일을 바꾸려면 아래 한 곳만 수정)
+    function owner() {
+      return request.auth != null
+        && request.auth.token.email == 'herrleech.interpretation@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    // 스크래퍼(Admin SDK)만 쓰기 가능: 클라이언트는 읽기 전용
+    match /qt/{date}        { allow read: if owner(); allow write: if false; }
+    match /bible/{chapter}  { allow read: if owner(); allow write: if false; }
+    match /users/{uid}/{document=**} {
+      allow read, write: if owner() && request.auth.uid == uid;
+    }
+  }
+}
