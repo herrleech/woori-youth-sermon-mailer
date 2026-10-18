@@ -293,11 +293,11 @@ function renderNotes() {
     <div id="n-count" class="count"></div><div id="n-list" class="cards list"></div>`;
   const draw = () => {
     const q = noteQ.trim().toLowerCase();
-    const rows = notes.filter((n) => !q || `${n.title} ${n.passage || ""} ${n.preview}`.toLowerCase().includes(q))
-      .sort((a, b) => ts(b.updatedAt) - ts(a.updatedAt));
+    const rows = notes.filter((n) => !q || `${n.title} ${n.passage || ""} ${n.sermonDate || ""} ${n.preview}`.toLowerCase().includes(q))
+      .sort((a, b) => noteDate(b).localeCompare(noteDate(a)) || ts(b.updatedAt) - ts(a.updatedAt));
     $("#n-count").textContent = `${rows.length}개`;
     $("#n-list").innerHTML = rows.length ? rows.map((n) => `<a class="card" href="#/note/${n.id}">
-      <div class="meta"><div class="date">${n.updatedAt ? new Date(ts(n.updatedAt)).toLocaleDateString("ko-KR") : ""}</div></div>
+      <div class="meta"><div class="date">${noteDate(n) ? fmtDate(noteDate(n)) : ""}</div></div>
       <div class="body"><h3>${esc(n.title || "제목 없음")}</h3>${n.passage ? `<div class="ref">${esc(n.passage)}</div>` : ""}<p class="sum">${esc(n.preview || "")}</p></div></a>`).join("")
       : `<div class="empty">설교 메모가 없습니다. 새 메모를 만들어 보세요.</div>`;
   };
@@ -306,6 +306,8 @@ function renderNotes() {
   listeners.add(draw); draw();
   return () => listeners.delete(draw);
 }
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const noteDate = (n) => n.sermonDate || (ts(n.updatedAt) ? ymd(new Date(ts(n.updatedAt))) : "");
 const ts = (v) => (v && v.toMillis ? v.toMillis() : typeof v === "number" ? v : 0);
 
 // ───────────── 설교 메모 에디터 ─────────────
@@ -335,6 +337,7 @@ function renderNote(id) {
       <button id="n-del" class="btn small ghost">삭제</button></div>
     <input id="n-title" class="note-title" placeholder="설교 제목" maxlength="200">
     <div class="passage-row">
+      <label class="date-field">설교 날짜 <input id="n-date" type="date" class="passage-input"></label>
       <input id="n-passage" class="passage-input" placeholder="본문 (예: 요3:16-18 / 롬8 / 시편 23편)" maxlength="200">
       <span id="n-chips" class="chips"></span>
     </div>
@@ -353,7 +356,7 @@ function renderNote(id) {
     </div>
     <p class="count">팁: <b>요3:16</b> 처럼 입력하고 띄어쓰기하면 구절이 링크가 되어 새번역 본문을 팝업으로 볼 수 있어요. 줄 처음에 <b>1.</b> 또는 <b>-</b> 를 치면 목록이 됩니다.</p>`;
 
-  const stEl = $("#n-state"), titleEl = $("#n-title"), passEl = $("#n-passage"), chipsEl = $("#n-chips");
+  const stEl = $("#n-state"), titleEl = $("#n-title"), dateEl = $("#n-date"), passEl = $("#n-passage"), chipsEl = $("#n-chips");
   const busy = (on) => { stEl.textContent = on ? "저장 중…" : "저장됨"; setSync(on ? "busy" : "ok"); };
 
   const quill = new Quill("#editor", {
@@ -392,7 +395,7 @@ function renderNote(id) {
     const delta = JSON.stringify(quill.getContents());
     busy(true);
     try {
-      await store.saveNote(id, { title: titleEl.value, passage: passEl.value, delta, preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) });
+      await store.saveNote(id, { title: titleEl.value, passage: passEl.value, sermonDate: dateEl.value, delta, preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) });
       lastJson = delta; dirty = false; busy(false);
     } catch (e) { stEl.textContent = "저장 실패: " + e.message; setSync("err"); }
   }, 800);
@@ -405,6 +408,8 @@ function renderNote(id) {
     if (source !== "silent") touch();
   });
   titleEl.addEventListener("input", touch);
+  dateEl.addEventListener("input", touch);
+  dateEl.value = ymd(new Date()); // 새 메모 기본값: 오늘 (기존 메모는 pull 에서 저장된 날짜로 교체)
 
   // 본문 입력 → 칩 표시, 입력 확정(Enter/포커스 이동) 시 새번역 팝업
   const drawChips = () => {
@@ -433,6 +438,7 @@ function renderNote(id) {
     const n = notes.find((x) => x.id === id);
     if (!n) return;
     if (n.title !== undefined && !dirty && document.activeElement !== titleEl) titleEl.value = n.title || "";
+    if (!dirty && document.activeElement !== dateEl && dateEl.value !== noteDate(n)) dateEl.value = noteDate(n) || dateEl.value;
     if (!dirty && document.activeElement !== passEl && passEl.value !== (n.passage || "")) { passEl.value = n.passage || ""; shown = passEl.value; drawChips(); }
     if (!n.delta || dirty || n.delta === lastJson) { current = n; return; }
     const sel = quill.getSelection();
@@ -452,7 +458,7 @@ function renderNote(id) {
   };
   return () => {
     listeners.delete(pull);
-    if (dirty) { doSave.flush(); store.saveNote(id, { title: titleEl.value, passage: passEl.value, delta: JSON.stringify(quill.getContents()), preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) }); }
+    if (dirty) { doSave.flush(); store.saveNote(id, { title: titleEl.value, passage: passEl.value, sermonDate: dateEl.value, delta: JSON.stringify(quill.getContents()), preview: quill.getText().replace(/\s+/g, " ").trim().slice(0, 140) }); }
   };
 }
 
@@ -493,7 +499,7 @@ function exportData() {
     notes: notes.map((n) => {
       let delta = null;
       try { delta = JSON.parse(n.delta); } catch { /* 빈 메모 */ }
-      return { id: n.id, title: n.title || "", passage: n.passage || "", delta, updatedAt: ts(n.updatedAt) || null };
+      return { id: n.id, title: n.title || "", passage: n.passage || "", sermonDate: noteDate(n), delta, updatedAt: ts(n.updatedAt) || null };
     }),
     qtEntries: [...entries.values()].map((e) => ({
       date: e.id, highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "", updatedAt: ts(e.updatedAt) || null,
@@ -537,9 +543,11 @@ function normalizeImport(json) {
     const title = String(pick(n, ["title", "name", "subject", "heading"]));
     const passage = String(pick(n, ["passage", "verse", "scripture", "bible", "bibleVerse", "본문"]));
     const at = toMs(pick(n, ["updatedAt", "modifiedAt", "updated", "date", "createdAt", "created"]));
+    const dv = pick(n, ["sermonDate", "date", "createdAt", "created", "updatedAt"]);
+    const sermonDate = typeof dv === "string" && /^\d{4}-\d{2}-\d{2}/.test(dv) ? dv.slice(0, 10) : toMs(dv) ? ymd(new Date(toMs(dv))) : "";
     const plain = (delta.ops || []).map((o) => (typeof o.insert === "string" ? o.insert : "")).join("");
     const id = String(n.id || "imp_" + hash(title + "|" + passage + "|" + plain.slice(0, 300)));
-    return { id, patch: { title, passage, delta: JSON.stringify(delta), preview: plain.replace(/\s+/g, " ").trim().slice(0, 140) }, at };
+    return { id, patch: { title, passage, sermonDate, delta: JSON.stringify(delta), preview: plain.replace(/\s+/g, " ").trim().slice(0, 140) }, at };
   });
   const outEntries = rawEntries.filter((e) => e && /^\d{4}-\d{2}-\d{2}$/.test(e.date || e.id || ""))
     .map((e) => ({ date: e.date || e.id, patch: { highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "" } }));

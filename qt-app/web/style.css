@@ -142,3 +142,9 @@ body { background: linear-gradient(180deg, #e6f2ff 0%, var(--bg) 240px); backgro
 .sheet-text .v { margin: 0 0 6px; }
 .sheet-text .v.hl { background: var(--hl-y); border-radius: 6px; padding: 2px 6px; }
 .sheet-body { max-height: 80vh; }
+
+.date-field { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.date-field .passage-input { flex: 0 0 auto; padding: 6px 10px; }
+
+.date-field { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.date-field .passage-input { flex: 0 0 auto; padding: 6px 10px; }
