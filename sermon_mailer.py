@@ -17,6 +17,7 @@ CHANNEL_ID = "UCJe7PaggYL8ArlQPvvJbN3Q"  # @woori_youth
 FEED_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 UPLOADS_FEED_URL = f"https://www.youtube.com/feeds/videos.xml?playlist_id=UU{CHANNEL_ID[2:]}"
 SEEN_FILE = Path(__file__).with_name("seen.json")
+LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
 MAX_AGE = timedelta(days=3)  # 이보다 오래된 영상은 보내지 않고 기록만 한다
@@ -29,6 +30,7 @@ PROMPT = """다음은 교회 청년부 설교 영상입니다. 영상을 듣고 
 - preacher: 설교자 (예: 지원일 목사)
 - summary: 설교 내용을 한국어로 정리한 글. 핵심 메시지 한 줄 + 3~5개 소제목별 요점 (총 400~700자)
 - takeaways: 청년들이 삶에 적용할 점 2~3개 (문자열 배열)
+- tags: 설교의 주제 태그 2~4개 (짧은 한국어 명사, 문자열 배열. 예: 불안, 관계, 전도, 순종)
 
 영상 제목: {title}
 영상 설명:
@@ -64,6 +66,45 @@ def fetch_via_api(key):
                   i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
                   i["snippet"].get("description", ""))
             for i in r.json()["items"]]
+
+
+def fetch_all_via_api(key, max_items=300):
+    """업로드 목록 전체(최신순)를 페이지 단위로 가져온다."""
+    out, token = [], None
+    while len(out) < max_items:
+        params = {"part": "snippet,contentDetails", "playlistId": f"UU{CHANNEL_ID[2:]}",
+                  "maxResults": 50, "key": key}
+        if token:
+            params["pageToken"] = token
+        r = requests.get("https://www.googleapis.com/youtube/v3/playlistItems", params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        out += [video(i["contentDetails"]["videoId"], i["snippet"]["title"],
+                      i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
+                      i["snippet"].get("description", "")) for i in data["items"]]
+        token = data.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
+def library_path(v):
+    return LIBRARY_DIR / f"{v['published'].strftime('%Y-%m-%d')}_{v['id']}.json"
+
+
+def save_library(v, info):
+    """설교 하나당 JSON 파일 하나로 저장한다 (나중에 대시보드의 데이터가 된다)."""
+    if DRY_RUN:
+        return
+    LIBRARY_DIR.mkdir(exist_ok=True)
+    record = {
+        "video_id": v["id"], "url": v["url"], "published": v["published"].isoformat(),
+        "video_title": v["title"], "title": info.get("title", ""), "scripture": info.get("scripture", ""),
+        "preacher": info.get("preacher", ""), "summary": info.get("summary", ""),
+        "takeaways": info.get("takeaways", []), "tags": info.get("tags", []),
+        "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg",
+    }
+    library_path(v).write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def fetch_via_rss():
@@ -208,6 +249,8 @@ def main():
                 continue
             info = {"title": title, "scripture": "-", "preacher": "-",
                     "summary": "요약을 만들지 못했습니다. 영상 링크에서 확인해주세요.", "takeaways": []}
+        else:
+            save_library(v, info)
         body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"))
         send_mail(f"[청년교구 새 설교] {info.get('title', title)}", body_html, body_text)
         print(f"발송 완료: {title}")
@@ -215,6 +258,28 @@ def main():
 
     if not DRY_RUN:
         save_seen(seen)
+    backfill()
+
+
+def backfill():
+    """BACKFILL=N 이면 라이브러리에 없는 지난 설교를 최대 N편 요약해 저장한다 (메일은 보내지 않음)."""
+    limit = int(os.environ.get("BACKFILL", "0"))
+    key = os.environ.get("YOUTUBE_API_KEY")
+    if limit <= 0 or not key:
+        return
+    done = 0
+    for v in fetch_all_via_api(key):  # 최신순
+        if done >= limit:
+            break
+        if not is_sermon(v["title"]) or library_path(v).exists():
+            continue
+        info = summarize(v["id"], v["url"], v["title"], v["description"])
+        if info is None:
+            print(f"백필 실패, 건너뜀: {v['title']}", file=sys.stderr)
+            continue
+        save_library(v, info)
+        print(f"백필 저장: {v['title']}")
+        done += 1
 
 
 if __name__ == "__main__":
