@@ -267,7 +267,7 @@ def backfill():
     key = os.environ.get("YOUTUBE_API_KEY")
     if limit <= 0 or not key:
         return
-    done = 0
+    done = fails = 0
     for v in fetch_all_via_api(key):  # 최신순
         if done >= limit:
             break
@@ -275,8 +275,14 @@ def backfill():
             continue
         info = summarize(v["id"], v["url"], v["title"], v["description"])
         if info is None:
-            print(f"백필 실패, 건너뜀: {v['title']}", file=sys.stderr)
+            fails += 1
+            print(f"백필 실패: {v['title']}", file=sys.stderr)
+            if fails >= 2:  # 무료 한도 초과/서버 혼잡일 가능성이 커서 오늘은 멈춘다
+                print("연속 실패로 오늘 백필을 중단합니다.", file=sys.stderr)
+                break
             continue
+        fails = 0
+        time.sleep(20)  # 분당 요청 한도 보호
         save_library(v, info)
         print(f"백필 저장: {v['title']}")
         done += 1

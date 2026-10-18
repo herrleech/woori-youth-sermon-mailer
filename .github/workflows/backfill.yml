@@ -1,4 +1,4 @@
-name: backfill-library
+﻿name: backfill-library
 
 on:
   schedule:
@@ -25,7 +25,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Backfill past sermons
         env:
-          BACKFILL: "5"   # 하루에 채울 설교 수 (Gemini 무료 한도 안에서)
+          BACKFILL: "3"   # 하루에 채울 설교 수 (Gemini 무료 한도 안에서)
           DRY_RUN: "0"
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
