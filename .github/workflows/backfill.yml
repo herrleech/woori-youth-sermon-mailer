@@ -27,6 +27,7 @@ jobs:
         env:
           BACKFILL: "3"   # 하루에 채울 설교 수 (Gemini 무료 한도 안에서)
           DRY_RUN: "0"
+          BACKFILL_ONLY: "1"   # 라이브러리만 채우고 새 설교 메일은 보내지 않는다
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}

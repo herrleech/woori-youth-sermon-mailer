@@ -222,6 +222,9 @@ def send_mail(subject, body_html, body_text):
 
 
 def main():
+    if os.environ.get("BACKFILL_ONLY") == "1":
+        backfill()
+        return
     videos = fetch_videos()
     if videos is None:  # 일시적 장애: 실패로 처리하지 않고 다음 실행(30분 뒤)에 재시도
         print("유튜브 영상 목록을 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
