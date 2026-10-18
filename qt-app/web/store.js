@@ -10,18 +10,16 @@ let impl;
 
 // ───────────────────────── Firebase ─────────────────────────
 async function makeFirebase() {
-  const [{ initializeApp }, A, F, S] = await Promise.all([
+  const [{ initializeApp }, A, F] = await Promise.all([
     import(FB + "firebase-app.js"),
     import(FB + "firebase-auth.js"),
     import(FB + "firebase-firestore.js"),
-    import(FB + "firebase-storage.js"),
   ]);
   const app = initializeApp(firebaseConfig);
   const auth = A.getAuth(app);
   const db = F.initializeFirestore(app, {
     localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }),
   });
-  const storage = S.getStorage(app);
   let uid = null;
   const mine = (sub) => F.collection(db, "users", uid, sub);
   const sub = (q, cb) => F.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))));
@@ -46,12 +44,6 @@ async function makeFirebase() {
     async getChapter(bookNo, ch) {
       const s = await F.getDoc(F.doc(db, "bible", `${bookNo}_${ch}`));
       return s.exists() ? s.data().verses : null;
-    },
-    async uploadFile(file) {
-      const path = `users/${uid}/files/${newId()}_${file.name}`;
-      const r = S.ref(storage, path);
-      await S.uploadBytes(r, file, { contentType: file.type });
-      return { url: await S.getDownloadURL(r), name: file.name, type: file.type };
     },
   };
 }
@@ -114,14 +106,6 @@ function makeLocal() {
       const all = await fetch("demo/bible.json").then((r) => r.json()).catch(() => ({}));
       return all[`${bookNo}_${ch}`] || null;
     },
-    uploadFile: (file) =>
-      new Promise((res, rej) => {
-        if (file.size > 2 * 1024 * 1024) return rej(new Error("데모 모드에서는 2MB 이하만 첨부할 수 있습니다"));
-        const r = new FileReader();
-        r.onload = () => res({ url: r.result, name: file.name, type: file.type });
-        r.onerror = rej;
-        r.readAsDataURL(file);
-      }),
   };
 }
 

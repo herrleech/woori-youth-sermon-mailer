@@ -314,22 +314,8 @@ function setupQuill() {
     static formats(n) { return n.getAttribute("data-ref"); }
   }
   Quill.register(VerseBlot);
-  const Link = Quill.import("formats/link");
-  Link.PROTOCOL_WHITELIST.push("data", "blob"); // 데모 모드 첨부 링크
 }
 
-function ytEmbed(u) {
-  const m = /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/))([\w-]{6,})/.exec(u);
-  return m ? `https://www.youtube.com/embed/${m[1]}` : u;
-}
-function pickFile(accept) {
-  return new Promise((res) => {
-    const i = document.createElement("input");
-    i.type = "file"; if (accept) i.accept = accept;
-    i.onchange = () => res(i.files[0] || null);
-    i.click();
-  });
-}
 
 function renderNote(id) {
   setupQuill();
@@ -352,7 +338,7 @@ function renderNote(id) {
         <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button><button class="ql-strike"></button></span>
         <span class="ql-formats"><select class="ql-color"></select><select class="ql-background" title="형광펜"></select></span>
         <span class="ql-formats"><button class="ql-list" value="ordered"></button><button class="ql-list" value="bullet"></button><button class="ql-indent" value="+1"></button></span>
-        <span class="ql-formats"><button class="ql-image" title="사진"></button><button class="ql-video" title="영상"></button><button class="ql-attach txt" title="파일 첨부">📎</button><button class="ql-clean"></button></span>
+        <span class="ql-formats"><button class="ql-clean"></button></span>
       </div>
       <div id="editor"></div>
     </div>
@@ -370,30 +356,6 @@ function renderNote(id) {
         handlers: {
           undo() { this.quill.history.undo(); },
           redo() { this.quill.history.redo(); },
-          async image() {
-            const f = await pickFile("image/*"); if (!f) return;
-            try { busy(true); const r = await store.uploadFile(f); const at = quill.getSelection(true).index; quill.insertEmbed(at, "image", r.url, "user"); quill.setSelection(at + 1); }
-            catch (e) { toast("업로드 실패: " + e.message); } busy(false);
-          },
-          async video() {
-            let u = prompt("영상 주소(YouTube 등)를 붙여넣으세요. 비워두면 동영상 파일을 선택합니다.");
-            if (u === null) return;
-            try {
-              if (u.trim()) u = ytEmbed(u.trim());
-              else { const f = await pickFile("video/*"); if (!f) return; busy(true); u = (await store.uploadFile(f)).url; }
-              const at = quill.getSelection(true).index; quill.insertEmbed(at, "video", u, "user"); quill.setSelection(at + 1);
-            } catch (e) { toast("업로드 실패: " + e.message); } busy(false);
-          },
-          async attach() {
-            const f = await pickFile("");
-            if (!f) return;
-            try {
-              busy(true); const r = await store.uploadFile(f);
-              const at = quill.getSelection(true).index; const label = "📎 " + r.name;
-              quill.insertText(at, label, { link: r.url }, "user"); quill.insertText(at + label.length, " ", { link: false }, "user");
-              quill.setSelection(at + label.length + 1);
-            } catch (e) { toast("업로드 실패: " + e.message); } busy(false);
-          },
         },
       },
       history: { delay: 500, maxStack: 300, userOnly: true },

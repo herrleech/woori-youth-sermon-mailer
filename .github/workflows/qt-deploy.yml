@@ -8,7 +8,6 @@ on:
       - "qt-app/web/**"
       - "qt-app/firebase.json"
       - "qt-app/firestore.rules"
-      - "qt-app/storage.rules"
       - ".github/workflows/qt-deploy.yml"
   workflow_dispatch:
 
@@ -33,8 +32,5 @@ jobs:
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
           PROJECT=$(python3 -c "import json,sys;print(json.load(open('$RUNNER_TEMP/sa.json'))['project_id'])")
-          ONLY="hosting,firestore:rules"
-          # Storage 규칙은 Storage 를 켠 뒤에만 배포 가능 (STORAGE_ENABLED 변수를 'true' 로 설정)
-          if [ "${{ vars.STORAGE_ENABLED }}" = "true" ]; then ONLY="$ONLY,storage"; fi
-          npx -y firebase-tools@13 deploy --only "$ONLY" --project "$PROJECT" --non-interactive
+          npx -y firebase-tools@13 deploy --only hosting,firestore:rules --project "$PROJECT" --non-interactive
           rm -f "$RUNNER_TEMP/sa.json"
