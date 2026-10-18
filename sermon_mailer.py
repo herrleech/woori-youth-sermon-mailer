@@ -15,7 +15,8 @@ import requests
 
 CHANNEL_ID = "UCJe7PaggYL8ArlQPvvJbN3Q"  # @woori_youth
 FEED_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
-SEEN_FILE = Path(__file__).with_name("seen.json")
+UPLOADS_FEED_URL = f"https://www.youtube.com/feeds/videos.xml?playlist_id=UU{CHANNEL_ID[2:]}"
+SEEN_FILE =Path(__file__).with_name("seen.json")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
@@ -45,15 +46,20 @@ def save_seen(seen):
 
 
 def fetch_feed():
-    for attempt in range(4):
+    """유튜브 RSS는 가끔 404/500을 내므로 두 주소를 번갈아 여러 번 시도한다. 실패하면 None."""
+    urls = [FEED_URL, UPLOADS_FEED_URL]
+    for attempt in range(8):
+        url = urls[attempt % 2]
         try:
-            r = requests.get(FEED_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
             r.raise_for_status()
-            return feedparser.parse(r.content).entries
+            entries = feedparser.parse(r.content).entries
+            if entries:
+                return entries
         except requests.RequestException as e:
             print(f"피드 재시도 {attempt + 1}: {e}", file=sys.stderr)
-            time.sleep(3 * (attempt + 1))
-    raise RuntimeError("유튜브 피드를 가져오지 못했습니다")
+        time.sleep(4 * (attempt + 1))
+    return None
 
 
 def is_sermon(title):
@@ -138,6 +144,9 @@ def send_mail(subject, body_html, body_text):
 
 def main():
     entries = fetch_feed()
+    if entries is None:  # 일시적 피드 장애: 실패로 처리하지 않고 다음 실행(30분 뒤)에 재시도
+        print("유튜브 피드를 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
+        return
     seen = load_seen()
 
     if seen is None:  # 첫 실행: 과거 영상은 보내지 않고 기록만 한다
