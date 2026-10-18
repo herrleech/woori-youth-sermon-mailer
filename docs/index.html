@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>청년교구 설교 라이브러리</title>
+<style>
+:root {
+  --bg: #f6f5f1; --card: #ffffff; --ink: #1f2328; --muted: #6b7280; --line: #e4e2db;
+  --accent: #2f5d50; --accent-soft: #e3eee9; --chip: #efede6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --card: #1e2125; --ink: #e8e8e6; --muted: #9aa0a6; --line: #2e3238;
+    --accent: #7fc4ae; --accent-soft: #23332d; --chip: #2a2e33;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --card: #1e2125; --ink: #e8e8e6; --muted: #9aa0a6; --line: #2e3238;
+  --accent: #7fc4ae; --accent-soft: #23332d; --chip: #2a2e33;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; line-height: 1.6; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px 64px; }
+header { padding: 32px 0 16px; }
+h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
+.sub { color: var(--muted); margin: 4px 0 0; font-size: .95rem; }
+.bar { display: grid; gap: 10px; grid-template-columns: 1fr; margin: 16px 0 8px; }
+@media (min-width: 720px) { .bar { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; } }
+input, select { width: 100%; padding: 10px 12px; font: inherit; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: 10px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+.chip { border: 1px solid transparent; background: var(--chip); color: var(--ink); padding: 4px 10px;
+  border-radius: 999px; font: inherit; font-size: .85rem; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.meta { display: flex; align-items: center; justify-content: space-between; margin: 12px 0; color: var(--muted); font-size: .9rem; }
+.reset { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  cursor: pointer; text-align: left; padding: 0; font: inherit; color: inherit; display: flex; flex-direction: column; }
+.card:hover { border-color: var(--accent); }
+.thumb { aspect-ratio: 16 / 9; width: 100%; object-fit: cover; background: var(--chip); display: block; }
+.body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+.date { color: var(--muted); font-size: .8rem; }
+.title { font-weight: 700; font-size: 1.02rem; line-height: 1.35; }
+.line { color: var(--muted); font-size: .88rem; }
+.mini { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mini span { background: var(--accent-soft); color: var(--accent); font-size: .75rem; padding: 1px 8px; border-radius: 999px; }
+.empty { text-align: center; color: var(--muted); padding: 64px 0; }
+dialog { border: 0; padding: 0; border-radius: 16px; width: min(720px, calc(100vw - 24px)); max-height: 90vh;
+  background: var(--card); color: var(--ink); }
+dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.dlg { padding: 20px 22px 24px; overflow: auto; max-height: 90vh; }
+.dlg img { width: 100%; border-radius: 10px; aspect-ratio: 16/9; object-fit: cover; }
+.dlg h2 { margin: 14px 0 4px; font-size: 1.3rem; line-height: 1.35; }
+.dlg .summary { white-space: pre-wrap; }
+.dlg ul { padding-left: 1.2em; }
+.btns { display: flex; gap: 8px; margin-top: 16px; }
+.btn { background: var(--accent); color: #fff; border: 0; padding: 9px 16px; border-radius: 10px; font: inherit;
+  text-decoration: none; cursor: pointer; }
+.btn.ghost { background: var(--chip); color: var(--ink); }
+.foot { color: var(--muted); font-size: .8rem; margin-top: 32px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>청년교구 설교 라이브러리</h1>
+    <p class="sub">분당우리교회 청년교구 · AI가 정리한 설교 요약 모음</p>
+  </header>
+
+  <div class="bar">
+    <input id="q" type="search" placeholder="제목, 본문, 설교자, 요약 내용 검색" aria-label="검색">
+    <select id="year" aria-label="연도"></select>
+    <select id="month" aria-label="월"></select>
+    <select id="preacher" aria-label="설교자"></select>
+    <select id="book" aria-label="성경 책"></select>
+  </div>
+  <div class="tags" id="tags" aria-label="주제 태그"></div>
+  <div class="meta"><span id="count"></span><button class="reset" id="reset">필터 초기화</button></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>조건에 맞는 설교가 없어요.</div>
+  <p class="foot">요약은 AI가 만든 것이라 부정확할 수 있어요. 정확한 내용은 영상을 확인해주세요.</p>
+</div>
+
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+<script src="data.js"></script>
+<script>
+const S = (window.SERMONS || []).map(s => {
+  const d = new Date(s.published);
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  return { ...s, y: String(kst.getUTCFullYear()), m: String(kst.getUTCMonth() + 1),
+    date: `${kst.getUTCFullYear()}.${String(kst.getUTCMonth() + 1).padStart(2, '0')}.${String(kst.getUTCDate()).padStart(2, '0')}`,
+    book: (s.scripture || '').trim().split(/\s+/)[0] || '' };
+});
+const $ = id => document.getElementById(id);
+const state = { q: '', year: '', month: '', preacher: '', book: '', tag: '' };
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uniq = f => [...new Set(S.map(f).filter(Boolean))];
+
+function fill(sel, label, values, sort) {
+  const v = sort ? values.sort(sort) : values;
+  $(sel).innerHTML = `<option value="">${label}</option>` + v.map(x => `<option>${esc(x)}</option>`).join('');
+}
+fill('year', '전체 연도', uniq(s => s.y), (a, b) => b - a);
+fill('month', '전체 월', uniq(s => s.m), (a, b) => a - b);
+$('month').innerHTML = '<option value="">전체 월</option>' + Array.from({length: 12}, (_, i) => `<option value="${i+1}">${i+1}월</option>`).join('');
+fill('preacher', '전체 설교자', uniq(s => s.preacher), (a, b) => a.localeCompare(b, 'ko'));
+fill('book', '전체 성경', uniq(s => s.book), (a, b) => a.localeCompare(b, 'ko'));
+
+const tagCount = {};
+S.forEach(s => (s.tags || []).forEach(t => tagCount[t] = (tagCount[t] || 0) + 1));
+const tagList = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'));
+$('tags').innerHTML = tagList.map(([t, n]) => `<button class="chip" aria-pressed="false" data-tag="${esc(t)}">${esc(t)} ${n}</button>`).join('');
+
+function match(s) {
+  if (state.year && s.y !== state.year) return false;
+  if (state.month && s.m !== state.month) return false;
+  if (state.preacher && s.preacher !== state.preacher) return false;
+  if (state.book && s.book !== state.book) return false;
+  if (state.tag && !(s.tags || []).includes(state.tag)) return false;
+  if (state.q) {
+    const hay = [s.title, s.scripture, s.preacher, s.summary, (s.tags || []).join(' '), (s.takeaways || []).join(' ')].join(' ').toLowerCase();
+    return state.q.toLowerCase().split(/\s+/).every(w => hay.includes(w));
+  }
+  return true;
+}
+
+function render() {
+  const list = S.filter(match);
+  $('count').textContent = `${list.length}편 / 전체 ${S.length}편`;
+  $('empty').hidden = list.length > 0;
+  $('grid').innerHTML = list.map(s => `
+    <button class="card" data-id="${esc(s.video_id)}">
+      <img class="thumb" loading="lazy" src="${esc(s.thumbnail)}" alt="">
+      <div class="body">
+        <span class="date">${s.date}</span>
+        <span class="title">${esc(s.title)}</span>
+        <span class="line">${esc(s.scripture)} · ${esc(s.preacher)}</span>
+        <span class="mini">${(s.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</span>
+      </div>
+    </button>`).join('');
+  document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.tag === state.tag));
+}
+
+function open(id) {
+  const s = S.find(x => x.video_id === id);
+  if (!s) return;
+  $('dlgBody').innerHTML = `
+    <img src="${esc(s.thumbnail)}" alt="">
+    <h2>${esc(s.title)}</h2>
+    <div class="line">${s.date} · ${esc(s.scripture)} · ${esc(s.preacher)}</div>
+    <h3>요약</h3><div class="summary">${esc(s.summary)}</div>
+    ${(s.takeaways || []).length ? `<h3>적용 포인트</h3><ul>${s.takeaways.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+    <div class="mini">${(s.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</div>
+    <div class="btns"><a class="btn" href="${esc(s.url)}" target="_blank" rel="noopener">▶ 영상 보기</a>
+    <button class="btn ghost" id="close">닫기</button></div>`;
+  $('dlg').showModal();
+  $('close').onclick = () => $('dlg').close();
+}
+
+$('q').addEventListener('input', e => { state.q = e.target.value.trim(); render(); });
+['year', 'month', 'preacher', 'book'].forEach(k => $(k).addEventListener('change', e => { state[k] = e.target.value; render(); }));
+$('tags').addEventListener('click', e => {
+  const t = e.target.closest('.chip'); if (!t) return;
+  state.tag = state.tag === t.dataset.tag ? '' : t.dataset.tag; render();
+});
+$('grid').addEventListener('click', e => { const c = e.target.closest('.card'); if (c) open(c.dataset.id); });
+$('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').close(); });
+$('reset').addEventListener('click', () => {
+  Object.assign(state, { q: '', year: '', month: '', preacher: '', book: '', tag: '' });
+  $('q').value = ''; ['year', 'month', 'preacher', 'book'].forEach(k => $(k).value = ''); render();
+});
+render();
+</script>
+</body>
+</html>
