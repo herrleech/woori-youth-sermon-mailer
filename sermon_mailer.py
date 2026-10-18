@@ -16,10 +16,11 @@ import requests
 CHANNEL_ID = "UCJe7PaggYL8ArlQPvvJbN3Q"  # @woori_youth
 FEED_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 UPLOADS_FEED_URL = f"https://www.youtube.com/feeds/videos.xml?playlist_id=UU{CHANNEL_ID[2:]}"
-SEEN_FILE =Path(__file__).with_name("seen.json")
+SEEN_FILE = Path(__file__).with_name("seen.json")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MAX_AGE = timedelta(days=3)  # 이보다 오래된 영상은 보내지 않고 기록만 한다
+GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-3.8-flash", "gemini-flash-latest") if m]
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
 
 PROMPT = """다음은 교회 청년부 설교 영상입니다. 영상을 듣고 아래 JSON으로만 답하세요.
@@ -96,35 +97,42 @@ def is_sermon(title):
     return any(k in title for k in SERMON_KEYWORDS)
 
 
-def summarize_with_video(url, title, description):
+def generate_json(contents):
+    """후보 모델을 순서대로 시도한다 (모델이 단종/변경돼도 동작하도록)."""
     from google import genai
-    from google.genai import types
+    from google.genai import errors, types
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=types.Content(parts=[
-            types.Part(file_data=types.FileData(file_uri=url)),
-            types.Part(text=PROMPT.format(title=title, description=description)),
-        ]),
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    return json.loads(resp.text)
+    last = None
+    for model in GEMINI_MODELS:
+        try:
+            resp = client.models.generate_content(
+                model=model, contents=contents,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            return json.loads(resp.text)
+        except errors.ClientError as e:
+            if e.code not in (404, 429):  # 모델 없음/한도 초과일 때만 다음 모델로
+                raise
+            print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
+            last = e
+    raise last
+
+
+def summarize_with_video(url, title, description):
+    from google.genai import types
+
+    return generate_json(types.Content(parts=[
+        types.Part(file_data=types.FileData(file_uri=url)),
+        types.Part(text=PROMPT.format(title=title, description=description)),
+    ]))
 
 
 def summarize_with_transcript(video_id, title, description):
-    from google import genai
-    from google.genai import types
     from youtube_transcript_api import YouTubeTranscriptApi
 
     transcript = " ".join(t.text for t in YouTubeTranscriptApi().fetch(video_id, languages=["ko"]))
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=PROMPT.format(title=title, description=description) + "\n\n[설교 자막]\n" + transcript,
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    return json.loads(resp.text)
+    return generate_json(PROMPT.format(title=title, description=description) + "\n\n[설교 자막]\n" + transcript)
 
 
 def summarize(video_id, url, title, description):
@@ -189,8 +197,8 @@ def main():
     kst = timezone(timedelta(hours=9))
     for v in [v for v in reversed(videos) if v["id"] not in seen]:
         vid, url, title, published = v["id"], v["url"], v["title"], v["published"]
-        if not is_sermon(title):
-            print(f"설교 아님, 건너뜀: {title}")
+        if not is_sermon(title) or now - published > MAX_AGE:
+            print(f"설교가 아니거나 오래된 영상, 기록만 함: {title}")
             seen.add(vid)
             continue
         info = summarize(vid, url, title, v["description"])
