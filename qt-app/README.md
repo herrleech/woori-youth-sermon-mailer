@@ -6,7 +6,7 @@
 1. Firebase 프로젝트 생성 → Authentication(Google), Firestore, Storage, Hosting 활성화
    (신규 프로젝트의 Storage 는 Blaze 요금제 필요. 개인 사용량은 무료 한도 내)
 2. 웹앱 등록 후 config 값을 `web/firebase-config.js` 에 붙여넣기
-3. `firestore.rules`, `storage.rules` 의 이메일이 본인 구글 계정인지 확인 후 `firebase deploy` (qt-app 폴더에서)
+3. `firestore.rules`, `storage.rules` 의 이메일이 본인 구글 계정인지 확인. 배포는 `qt-deploy` 워크플로가 push 때 자동 실행(서비스 계정에 'Firebase 관리자' 역할 필요)
 4. 서비스 계정 키(JSON)를 GitHub 저장소 Secret `FIREBASE_SERVICE_ACCOUNT` 로 등록
 5. Actions → `import-bible` 수동 실행 (새번역 전체 저장, 약 20~30분) / `qt-daily` 수동 실행(`backfill`=30 으로 과거 채우기)
 6. 폰 Chrome 에서 호스팅 주소 접속 → 메뉴 → "홈 화면에 추가"

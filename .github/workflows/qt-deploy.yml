@@ -1,0 +1,40 @@
+name: qt-deploy
+
+# qt-app/web 및 Firebase 규칙을 push 할 때마다(또는 수동으로) Firebase에 배포
+on:
+  push:
+    branches: [main]
+    paths:
+      - "qt-app/web/**"
+      - "qt-app/firebase.json"
+      - "qt-app/firestore.rules"
+      - "qt-app/storage.rules"
+      - ".github/workflows/qt-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: qt-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Deploy to Firebase
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        working-directory: qt-app
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          PROJECT=$(python3 -c "import json,sys;print(json.load(open('$RUNNER_TEMP/sa.json'))['project_id'])")
+          ONLY="hosting,firestore:rules"
+          # Storage 규칙은 Storage 를 켠 뒤에만 배포 가능 (STORAGE_ENABLED 변수를 'true' 로 설정)
+          if [ "${{ vars.STORAGE_ENABLED }}" = "true" ]; then ONLY="$ONLY,storage"; fi
+          npx -y firebase-tools@13 deploy --only "$ONLY" --project "$PROJECT" --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
