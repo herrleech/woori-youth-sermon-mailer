@@ -462,6 +462,7 @@ async function openVerse(key, hlKey) {
   const r = decodeRef(key);
   if (!r) return;
   const sheet = $("#sheet");
+  $("#sheet-copy").style.display = "";
   $("#sheet-title").textContent = `${refLabel(r)} · 새번역`;
   $("#sheet-text").textContent = "불러오는 중…";
   sheet.hidden = false;
@@ -484,11 +485,107 @@ $("#sheet-close").onclick = () => ($("#sheet").hidden = true);
 $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") $("#sheet").hidden = true; });
 $("#sheet-copy").onclick = () => sheetPlain && copyText(sheetPlain);
 
+// ───────────── 백업: JSON 내보내기 / 가져오기 ─────────────
+const stamp = () => new Date().toISOString().slice(0, 10);
+function exportData() {
+  const data = {
+    app: "qt-app", version: 1, exportedAt: new Date().toISOString(),
+    notes: notes.map((n) => {
+      let delta = null;
+      try { delta = JSON.parse(n.delta); } catch { /* 빈 메모 */ }
+      return { id: n.id, title: n.title || "", passage: n.passage || "", delta, updatedAt: ts(n.updatedAt) || null };
+    }),
+    qtEntries: [...entries.values()].map((e) => ({
+      date: e.id, highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "", updatedAt: ts(e.updatedAt) || null,
+    })),
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `qt-backup-${stamp()}.json` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`메모 ${data.notes.length}개 · QT 기록 ${data.qtEntries.length}개를 내보냈습니다`);
+}
+
+const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+const pick = (o, keys) => { for (const k of keys) if (o[k] != null && o[k] !== "") return o[k]; return ""; };
+const toMs = (v) => { if (typeof v === "number") return v < 1e12 ? v * 1000 : v; const t = Date.parse(v); return Number.isNaN(t) ? 0 : t; };
+
+// 어떤 형태의 JSON이든 {notes, entries} 로 정규화 (우리 형식 + 흔한 필드명)
+function normalizeImport(json) {
+  let rawNotes = [], rawEntries = [];
+  if (Array.isArray(json)) rawNotes = json;
+  else if (json && typeof json === "object") {
+    rawNotes = json.notes || json.memos || json.sermons || json.items || json.data || [];
+    rawEntries = json.qtEntries || [];
+    if (!Array.isArray(rawNotes)) rawNotes = Object.values(rawNotes);
+    if (!rawNotes.length && !rawEntries.length) { const arr = Object.values(json).find(Array.isArray); if (arr) rawNotes = arr; }
+  }
+  const tmp = document.createElement("div");
+  setupQuill();
+  const q = new Quill(tmp);
+  const toDelta = (n) => {
+    let d = n.delta;
+    if (typeof d === "string") { try { d = JSON.parse(d); } catch { d = null; } }
+    if (d && Array.isArray(d.ops)) return d;
+    if (Array.isArray(d)) return { ops: d };
+    const body = String(pick(n, ["html", "content", "body", "text", "memo", "note", "contents", "description"]) || "");
+    if (/<[a-z][\s\S]*>/i.test(body)) return q.clipboard.convert({ html: body });
+    return { ops: [{ insert: body.endsWith("\n") ? body : body + "\n" }] };
+  };
+  const outNotes = rawNotes.filter((n) => n && typeof n === "object").map((n) => {
+    const delta = toDelta(n);
+    const title = String(pick(n, ["title", "name", "subject", "heading"]));
+    const passage = String(pick(n, ["passage", "verse", "scripture", "bible", "bibleVerse", "본문"]));
+    const at = toMs(pick(n, ["updatedAt", "modifiedAt", "updated", "date", "createdAt", "created"]));
+    const plain = (delta.ops || []).map((o) => (typeof o.insert === "string" ? o.insert : "")).join("");
+    const id = String(n.id || "imp_" + hash(title + "|" + passage + "|" + plain.slice(0, 300)));
+    return { id, patch: { title, passage, delta: JSON.stringify(delta), preview: plain.replace(/\s+/g, " ").trim().slice(0, 140) }, at };
+  });
+  const outEntries = rawEntries.filter((e) => e && /^\d{4}-\d{2}-\d{2}$/.test(e.date || e.id || ""))
+    .map((e) => ({ date: e.date || e.id, patch: { highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "" } }));
+  return { notes: outNotes, entries: outEntries };
+}
+
+async function importFile(file) {
+  let json;
+  try { json = JSON.parse(await file.text()); } catch { return toast("JSON 파일을 읽을 수 없습니다"); }
+  let data;
+  try { data = normalizeImport(json); } catch (e) { return toast("형식을 해석하지 못했습니다: " + e.message); }
+  if (!data.notes.length && !data.entries.length) return toast("가져올 메모를 찾지 못했습니다");
+  if (!confirm(`메모 ${data.notes.length}개, QT 기록 ${data.entries.length}개를 가져올까요?\n(같은 ID의 기존 항목은 덮어씁니다)`)) return;
+  setSync("busy");
+  let ok = 0, fail = 0;
+  for (let i = 0; i < data.notes.length; i += 20) {
+    await Promise.all(data.notes.slice(i, i + 20).map((n) => store.saveNote(n.id, n.patch, n.at || 0).then(() => ok++, () => fail++)));
+  }
+  for (const e of data.entries) await store.saveEntry(e.date, e.patch).then(() => ok++, () => fail++);
+  setSync(fail ? "err" : "ok");
+  toast(`가져오기 완료: ${ok}개${fail ? `, 실패 ${fail}개` : ""}`);
+}
+
+function openBackup() {
+  $("#sheet-title").textContent = "백업 · 가져오기/내보내기";
+  $("#sheet-copy").style.display = "none";
+  $("#sheet-text").innerHTML = `
+    <p>내 설교 메모와 QT 기록(하이라이트·메시지·적용)을 JSON 파일로 저장하거나, 다른 앱의 JSON 메모를 가져옵니다.</p>
+    <p><button id="bk-export" class="btn primary">⤓ 내보내기</button>
+       <button id="bk-import" class="btn">⤒ 가져오기</button></p>
+    <p class="hint">가져오기: 이 앱의 백업 파일, 또는 제목·내용 필드가 있는 메모 목록 JSON. 사진·파일 첨부는 지원하지 않습니다.</p>`;
+  $("#sheet").hidden = false;
+  $("#bk-export").onclick = exportData;
+  $("#bk-import").onclick = () => {
+    const i = Object.assign(document.createElement("input"), { type: "file", accept: "application/json,.json" });
+    i.onchange = () => i.files[0] && importFile(i.files[0]);
+    i.click();
+  };
+}
+
 // ───────────── 시작 ─────────────
 async function boot() {
   store = await getStore();
   $("#btn-login").onclick = () => store.signIn().catch((e) => toast("로그인 실패: " + e.message));
   $("#btn-logout").onclick = () => store.signOut();
+  $("#btn-backup").onclick = openBackup;
   let unsubs = [];
   store.onAuth((user) => {
     unsubs.forEach((u) => u && u()); unsubs = [];

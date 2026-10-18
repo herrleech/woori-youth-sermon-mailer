@@ -38,8 +38,8 @@ async function makeFirebase() {
     subscribeNotes: (cb) => sub(mine("notes"), cb),
     saveEntry: (date, patch) =>
       F.setDoc(F.doc(mine("qtEntries"), date), { ...patch, updatedAt: F.serverTimestamp() }, { merge: true }),
-    saveNote: (id, patch) =>
-      F.setDoc(F.doc(mine("notes"), id), { ...patch, updatedAt: F.serverTimestamp() }, { merge: true }),
+    saveNote: (id, patch, at) =>
+      F.setDoc(F.doc(mine("notes"), id), { ...patch, updatedAt: at ? F.Timestamp.fromMillis(at) : F.serverTimestamp() }, { merge: true }),
     deleteNote: (id) => F.deleteDoc(F.doc(mine("notes"), id)),
     async getChapter(bookNo, ch) {
       const s = await F.getDoc(F.doc(db, "bible", `${bookNo}_${ch}`));
@@ -90,9 +90,9 @@ function makeLocal() {
       LSset("qt.entries", e);
       emit();
     },
-    async saveNote(id, patch) {
+    async saveNote(id, patch, at) {
       const n = notes();
-      n[id] = { ...n[id], ...patch, updatedAt: Date.now() };
+      n[id] = { ...n[id], ...patch, updatedAt: at || Date.now() };
       LSset("qt.notes", n);
       emit();
     },

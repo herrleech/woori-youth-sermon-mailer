@@ -1,5 +1,5 @@
 // 앱 셸 캐시 (stale-while-revalidate). Firestore/Storage 요청은 가로채지 않는다.
-const CACHE = "qt-shell-v6";
+const CACHE = "qt-shell-v7";
 const CDN = ["cdn.jsdelivr.net", "www.gstatic.com"];
 const SHELL = ["./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest"];
 
