@@ -156,6 +156,14 @@ function subtract(hls, k, s, e) {
   return out;
 }
 
+// 본문/구절 텍스트를 팝업 링크 버튼으로 (인식 실패 시 일반 텍스트). hl: 장 팝업에서 강조할 구절 텍스트
+function refBtn(label, hl) {
+  const k = parsePassage(label)[0];
+  if (!k) return esc(label);
+  const h = hl ? parsePassage(hl)[0] || "" : "";
+  return `<button class="reflink" data-ref="${k}" data-hl="${h}" title="새번역으로 보기">📖 ${esc(label)}</button>`;
+}
+
 function renderDetail(date) {
   const idx = qtList.findIndex((q) => q.date === date);
   const qt = qtList[idx];
@@ -178,7 +186,7 @@ function renderDetail(date) {
         </span>
       </div>
       <h1>${esc(qt.title)}</h1>
-      <div class="ref">${esc(qt.passage)} · ${esc(qt.verseRef)}</div>
+      <div class="ref">${refBtn(qt.passage, qt.verseRef)} · ${refBtn(qt.verseRef)}</div>
       ${BLOCKS.map(([k, label]) => text(k) ? `<section class="sec"><h2>${label}</h2><div class="txt" data-k="${k}"></div></section>` : "").join("")}
       <section class="sec"><h2>묵상질문</h2><div class="txt">${esc((qt.questions || []).join("\n\n"))}</div></section>
       <section class="sec"><h2>심정이 통하는 기도</h2><div class="txt">${esc(qt.prayer)}</div></section>
@@ -198,6 +206,7 @@ function renderDetail(date) {
       <button class="btn small primary" id="b-quote">인용 복사</button>
     </div>`;
 
+  view.querySelectorAll(".reflink").forEach((b) => b.addEventListener("click", () => openVerse(b.dataset.ref, b.dataset.hl)));
   const entry = () => entries.get(date) || {};
   const drawBlocks = () => {
     const hls = entry().highlights || [];
@@ -449,7 +458,7 @@ function renderNote(id) {
 
 // ───────────── 구절 팝업 (새번역) ─────────────
 let sheetPlain = "";
-async function openVerse(key) {
+async function openVerse(key, hlKey) {
   const r = decodeRef(key);
   if (!r) return;
   const sheet = $("#sheet");
@@ -463,7 +472,11 @@ async function openVerse(key) {
     const parts = [];
     for (let v = r.v1; v <= end; v++) if (verses[v - 1]) parts.push([v, verses[v - 1]]);
     if (!parts.length) { $("#sheet-text").textContent = `${r.ch}장에는 ${r.v1}절이 없습니다.`; sheetPlain = ""; return; }
-    $("#sheet-text").innerHTML = parts.map(([v, t]) => `<sup>${v}</sup>${esc(t)}`).join("<br>");
+    const hl = hlKey && decodeRef(hlKey);
+    const on = (v) => hl && hl.ch === r.ch && v >= hl.v1 && v <= (hl.v2 || hl.v1);
+    $("#sheet-text").innerHTML = parts.map(([v, t]) => `<div class="v${on(v) ? " hl" : ""}" data-v="${v}"><sup>${v}</sup>${esc(t)}</div>`).join("");
+    const first = $("#sheet-text .hl");
+    if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center" }));
     sheetPlain = `${refLabel(r)} (새번역)\n` + parts.map(([v, t]) => `${v} ${t}`).join("\n");
   } catch (e) { $("#sheet-text").textContent = "불러오지 못했습니다: " + e.message; }
 }

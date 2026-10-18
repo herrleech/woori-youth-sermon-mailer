@@ -1,7 +1,7 @@
 // 데이터 계층: Firebase(실시간 동기화) 또는 로컬 데모 모드(localStorage)
 import { firebaseConfig } from "./firebase-config.js";
 
-export const isFirebase = !!firebaseConfig.apiKey;
+export const isFirebase = !!firebaseConfig.apiKey && !new URLSearchParams(location.search).has("demo"); // ?demo 로 열면 로컬 데모 모드
 const FB = "https://www.gstatic.com/firebasejs/10.14.1/";
 
 export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
