@@ -1,14 +1,8 @@
 :root {
-  --bg: #f6f4ef; --card: #fff; --ink: #22302f; --muted: #6b7773; --line: #e3dfd5;
-  --accent: #2f4f4f; --accent-ink: #fff;
-  --hl-y: #fff3a3; --hl-g: #c9f0c6; --hl-p: #ffd3e0; --hl-b: #cfe5ff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161b1b; --card: #1f2626; --ink: #e8eeec; --muted: #94a19d; --line: #2d3837;
-    --accent: #7fb5ad; --accent-ink: #0d1514;
-    --hl-y: #6b5f12; --hl-g: #235a28; --hl-p: #6b2a3f; --hl-b: #1f4a75;
-  }
+  --bg: #eef6ff; --card: #ffffff; --ink: #24364d; --muted: #6a7f99; --line: #d3e4f8;
+  --accent: #4a90e2; --accent-ink: #ffffff; --soft: #dcecff;
+  --hl-y: #fff4b8; --hl-g: #d4f5d9; --hl-p: #ffdbe8; --hl-b: #cde6ff;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink);
@@ -113,3 +107,22 @@ mark.p { background: var(--hl-p); } mark.b { background: var(--hl-b); }
   background: #222; color: #fff; padding: 8px 14px; border-radius: 20px; font-size: 14px; }
 
 .ql-toolbar button.txt { width: auto !important; padding: 0 8px; font-size: 16px; }
+
+/* 밝은 파스텔 블루 마무리 */
+body { background: linear-gradient(180deg, #e6f2ff 0%, var(--bg) 240px); background-attachment: fixed; }
+.top { background: rgba(255,255,255,.85); backdrop-filter: blur(8px); border-bottom-color: var(--line); }
+.brand { color: var(--accent); }
+.top nav a.active { color: var(--accent); }
+.card, .sec { box-shadow: 0 2px 10px rgba(74,144,226,.10); border-color: var(--line); }
+.card { transition: transform .12s, box-shadow .12s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(74,144,226,.18); }
+.btn { background: #fff; border-color: var(--line); color: var(--accent); }
+.btn:hover { background: var(--soft); }
+.btn.primary, .btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.bar input, .bar select, .filters input { border-color: var(--line); }
+.bar input:focus, .input textarea:focus, .note-title:focus { outline: 2px solid #a9cdf5; border-color: var(--accent); }
+.input textarea { background: #f7fbff; }
+.toolbar { box-shadow: 0 -4px 14px rgba(74,144,226,.12); }
+.sheet-body { box-shadow: 0 -6px 24px rgba(74,144,226,.2); }
+.toast { background: #3b6fb0; }
+.sync.ok { background: #5bc0de; }
