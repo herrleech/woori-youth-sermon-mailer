@@ -146,17 +146,23 @@ def generate_json(contents):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     last = None
     for model in GEMINI_MODELS:
-        try:
-            resp = client.models.generate_content(
-                model=model, contents=contents,
-                config=types.GenerateContentConfig(response_mime_type="application/json"),
-            )
-            return json.loads(resp.text)
-        except errors.ClientError as e:
-            if e.code not in (404, 429):  # 모델 없음/한도 초과일 때만 다음 모델로
-                raise
-            print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
-            last = e
+        for attempt, wait in enumerate((0, 30, 90, 180)):  # 503(서버 혼잡)은 잠시 뒤 다시 시도
+            time.sleep(wait)
+            try:
+                resp = client.models.generate_content(
+                    model=model, contents=contents,
+                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                )
+                return json.loads(resp.text)
+            except errors.ServerError as e:
+                print(f"모델 {model} 서버 오류({e.code}), 재시도 {attempt + 1}", file=sys.stderr)
+                last = e
+            except errors.ClientError as e:
+                if e.code not in (404, 429):  # 모델 없음/한도 초과일 때만 다음 모델로
+                    raise
+                print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
+                last = e
+                break
     raise last
 
 
