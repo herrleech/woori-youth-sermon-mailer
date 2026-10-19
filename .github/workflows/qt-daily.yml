@@ -2,7 +2,7 @@ name: qt-daily
 
 on:
   schedule:
-    - cron: "0 21 * * *"   # UTC 21:00 = KST 06:00 (GitHub 사정으로 수 분~20분 지연될 수 있음)
+    - cron: "0 16 * * *"   # UTC 16:00 = KST 01:00 (GitHub 사정으로 수 분~수 시간 지연될 수 있음)
   workflow_dispatch:
     inputs:
       backfill:
