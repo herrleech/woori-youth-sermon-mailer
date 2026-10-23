@@ -20,6 +20,8 @@ SEEN_FILE = Path(__file__).with_name("seen.json")
 LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
+# 새 설교 메일은 조금 끈질기게(영상당 최대 약 2분 x 모델 수), 백필은 한 번만 시도하고 다음 날 다시 한다
+RETRY_WAITS = (0,) if os.environ.get("BACKFILL_ONLY") == "1" else (0, 20, 60)
 MAX_AGE = timedelta(days=3)  # 이보다 오래된 영상은 보내지 않고 기록만 한다
 GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-3.8-flash", "gemini-flash-latest") if m]
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
@@ -146,7 +148,7 @@ def generate_json(contents):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     last = None
     for model in GEMINI_MODELS:
-        for attempt, wait in enumerate((0, 30, 90, 180)):  # 503(서버 혼잡)은 잠시 뒤 다시 시도
+        for attempt, wait in enumerate(RETRY_WAITS):  # 503(서버 혼잡)은 잠시 뒤 다시 시도
             time.sleep(wait)
             try:
                 resp = client.models.generate_content(
@@ -264,6 +266,8 @@ def main():
         send_mail(f"[청년교구 새 설교] {info.get('title', title)}", body_html, body_text)
         print(f"발송 완료: {title}")
         seen.add(vid)
+        if not DRY_RUN:
+            save_seen(seen)  # 실행이 중간에 취소돼도 이미 보낸 메일이 다시 가지 않도록 바로 기록
 
     if not DRY_RUN:
         save_seen(seen)

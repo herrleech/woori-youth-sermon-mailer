@@ -15,7 +15,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +24,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Backfill past sermons
+        timeout-minutes: 20   # 이 단계가 시간 초과로 끊겨도 아래 저장 단계는 실행된다
         env:
           BACKFILL: "3"   # 하루에 채울 설교 수 (Gemini 무료 한도 안에서)
           DRY_RUN: "0"
@@ -35,8 +36,10 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python sermon_mailer.py
       - name: Build dashboard data
+        if: always()
         run: python build_site.py
       - name: Save seen list and library
+        if: always()
         run: |
           if [ -n "$(git status --porcelain seen.json library docs)" ]; then
             git config user.name "sermon-bot"

@@ -20,7 +20,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,6 +29,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Run mailer
+        timeout-minutes: 12   # 이 단계가 시간 초과로 끊겨도 아래 저장 단계는 실행된다
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -37,8 +38,10 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python sermon_mailer.py
       - name: Build dashboard data
+        if: always()
         run: python build_site.py
       - name: Save seen list and library
+        if: always()
         run: |
           if [ -n "$(git status --porcelain seen.json library docs)" ]; then
             git config user.name "sermon-bot"
