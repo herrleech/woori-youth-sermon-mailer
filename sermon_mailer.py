@@ -21,9 +21,13 @@ LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
 # 새 설교 메일은 조금 끈질기게(영상당 최대 약 2분 x 모델 수), 백필은 한 번만 시도하고 다음 날 다시 한다
-RETRY_WAITS = (0,) if os.environ.get("BACKFILL_ONLY") == "1" else (0, 20, 60)
+RETRY_WAITS = (0,) if os.environ.get("BACKFILL_ONLY") == "1" else (0, 10)
+CALL_TIMEOUT_MS = 90_000  # Gemini 호출 한 번당 최대 90초
 MAX_AGE = timedelta(days=3)  # 이보다 오래된 영상은 보내지 않고 기록만 한다
-GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-3.8-flash", "gemini-flash-latest") if m]
+# 2026-10-24 측정(gemini_probe.py): 3.6/3.5/3.1-lite가 두 영상 모두 10~50초에 성공, 3.8/latest는 503·504가 잦았다.
+# 모델 상황은 바뀌므로 문제가 생기면 Actions에서 gemini-probe를 다시 돌려 순서를 정한다.
+GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-3.6-flash", "gemini-3.5-flash",
+                             "gemini-3.1-flash-lite") if m]
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
 
 PROMPT = """다음은 교회 청년부 설교 영상입니다. 영상을 듣고 아래 JSON으로만 답하세요.
@@ -145,10 +149,12 @@ def generate_json(contents):
     from google import genai
     from google.genai import errors, types
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    # 호출 하나가 몇 분씩 매달리지 않도록 시간 제한을 둔다 (혼잡한 모델은 503을 내기까지 오래 걸린다)
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
+                          http_options=types.HttpOptions(timeout=CALL_TIMEOUT_MS))
     last = None
     for model in GEMINI_MODELS:
-        for attempt, wait in enumerate(RETRY_WAITS):  # 503(서버 혼잡)은 잠시 뒤 다시 시도
+        for attempt, wait in enumerate(RETRY_WAITS):  # 서버 오류/시간 초과는 잠시 뒤 한 번 더
             time.sleep(wait)
             try:
                 resp = client.models.generate_content(
@@ -156,15 +162,13 @@ def generate_json(contents):
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
                 )
                 return json.loads(resp.text)
-            except errors.ServerError as e:
-                print(f"모델 {model} 서버 오류({e.code}), 재시도 {attempt + 1}", file=sys.stderr)
-                last = e
-            except errors.ClientError as e:
-                if e.code not in (404, 429):  # 모델 없음/한도 초과일 때만 다음 모델로
-                    raise
+            except errors.ClientError as e:  # 모델 없음/한도 초과/영상 거부 등은 모델마다 다를 수 있어 다음 모델로
                 print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
                 last = e
                 break
+            except Exception as e:  # 503/504, 시간 초과, 응답 형식 오류
+                print(f"모델 {model} 실패({type(e).__name__}), 시도 {attempt + 1}", file=sys.stderr)
+                last = e
     raise last
 
 
