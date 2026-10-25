@@ -148,3 +148,12 @@ body { background: linear-gradient(180deg, #e6f2ff 0%, var(--bg) 240px); backgro
 
 .date-field { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
 .date-field .passage-input { flex: 0 0 auto; padding: 6px 10px; }
+
+/* 상세 화면: 읽는 본문은 타일 없이 평평하게, 입력 2개만 카드 유지 */
+.detail .sec { background: none; border: 0; box-shadow: none; border-radius: 0; padding: 0; margin: 0; }
+.detail .sec:not(.input) { padding: 18px 2px; border-top: 1px solid var(--line); }
+.detail .sec:not(.input) h2 { margin-bottom: 8px; }
+.detail .sec.input { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(74,144,226,.10); padding: 14px 16px; margin: 18px 0 8px; }
+.detail .reflink { background: none; padding: 0; border-radius: 0; text-decoration: underline dotted; text-underline-offset: 3px; }
+.detail .reflink:hover { background: none; text-decoration: underline; }
