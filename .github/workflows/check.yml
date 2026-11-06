@@ -7,6 +7,11 @@ on:
     - cron: "0 2-14 * * *"   # 11:00 ~ 23:00 KST, 매시 정각
     - cron: "30 14 * * *"    # 23:30 KST
   workflow_dispatch:
+    inputs:
+      test_video:
+        description: "테스트: 이 유튜브 영상 ID 하나만 메일로 보내본다 (기록은 건드리지 않음). 비워두면 평소처럼 실행"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -29,6 +34,7 @@ jobs:
       - name: Run mailer
         timeout-minutes: 25   # 이 단계가 시간 초과로 끊겨도 아래 저장 단계는 실행된다 (남은 설교는 다음 실행에서 처리)
         env:
+          TEST_VIDEO: ${{ github.event.inputs.test_video }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}

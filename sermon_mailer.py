@@ -270,7 +270,28 @@ def send_mail(subject, body_html, body_text):
         s.sendmail(user, to, msg.as_string())
 
 
+def send_test(video_id):
+    """TEST_VIDEO=영상ID : 그 영상 하나만 요약해 메일을 보낸다. '보낸 영상' 기록과 라이브러리는 건드리지 않는다."""
+    videos = fetch_videos() or []
+    v = next((x for x in videos if x["id"] == video_id), None)
+    if v is None:
+        print(f"테스트 영상 {video_id} 을(를) 최근 영상 목록에서 찾지 못했습니다.", file=sys.stderr)
+        sys.exit(1)
+    ch = v["channel"]
+    info = summarize(v["id"], v["url"], ch, v["title"], v["description"])
+    if info is None:
+        print(f"테스트 영상 요약 실패: {v['title']}", file=sys.stderr)
+        sys.exit(1)
+    kst = timezone(timedelta(hours=9))
+    body_html, body_text = render_email(info, v["url"], v["published"].astimezone(kst).strftime("%Y-%m-%d %H:%M"), ch)
+    send_mail(f"[테스트] [{ch['name']} 새 설교] {info.get('title', v['title'])}", body_html, body_text)
+    print(f"테스트 발송 완료: {v['title']}")
+
+
 def main():
+    if os.environ.get("TEST_VIDEO", "").strip():
+        send_test(os.environ["TEST_VIDEO"].strip())
+        return
     if os.environ.get("BACKFILL_ONLY") == "1":
         backfill()
         return
