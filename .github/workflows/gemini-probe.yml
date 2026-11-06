@@ -20,4 +20,4 @@ jobs:
       - name: Probe Gemini models
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -u gemini_probe.py
+        run: python -u gemini_probe_long.py   # 모델 목록 전체 측정은 gemini_probe.py (필요할 때 바꿔서 실행)

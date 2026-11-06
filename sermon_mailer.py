@@ -1,7 +1,8 @@
-"""분당우리교회 청년교구 유튜브 채널에 새 설교가 올라오면 요약해서 이메일로 보낸다."""
+"""분당우리교회 유튜브 채널(청년교구 + 본채널)에 새 설교가 올라오면 요약해서 설교마다 이메일로 보낸다."""
 import html
 import json
 import os
+import re
 import smtplib
 import sys
 import time
@@ -13,9 +14,15 @@ from pathlib import Path
 import feedparser
 import requests
 
-CHANNEL_ID = "UCJe7PaggYL8ArlQPvvJbN3Q"  # @woori_youth
-FEED_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
-UPLOADS_FEED_URL = f"https://www.youtube.com/feeds/videos.xml?playlist_id=UU{CHANNEL_ID[2:]}"
+CHANNELS = [
+    # library=True 인 채널만 library/ 와 대시보드에 저장한다
+    {"id": "UCJe7PaggYL8ArlQPvvJbN3Q", "name": "청년교구", "footer": "분당우리교회 청년교구",
+     "audience": "청년들", "library": True},  # @woori_youth
+    {"id": "UCBh3Qv-rKu6ZDxEcrio70Hw", "name": "분당우리교회", "footer": "분당우리교회",
+     "audience": "성도들", "library": False},  # @BundangWooriChurch
+]
+YOUTH = CHANNELS[0]
+LIVE_PATTERN = re.compile(r"생방송|라이브|🔴|\blive\b", re.I)  # 방송 중인 영상은 요약할 수 없다
 SEEN_FILE = Path(__file__).with_name("seen.json")
 LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
@@ -30,12 +37,12 @@ GEMINI_MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-3.6-flash",
                              "gemini-3.1-flash-lite") if m]
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
 
-PROMPT = """다음은 교회 청년부 설교 영상입니다. 영상을 듣고 아래 JSON으로만 답하세요.
+PROMPT = """다음은 {channel} 설교 영상입니다. 영상을 듣고 아래 JSON 객체 하나로만 답하세요 (목록이 아니라 객체).
 - title: 설교 제목 (영상 제목에서 날짜/교회명/부서명을 뺀 설교 제목)
 - scripture: 본문 성경구절 (예: 열왕기상 12장 25-33절). 모르면 "확인되지 않음"
 - preacher: 설교자 (예: 지원일 목사)
 - summary: 설교 내용을 한국어로 정리한 글. 핵심 메시지 한 줄 + 3~5개 소제목별 요점 (총 400~700자)
-- takeaways: 청년들이 삶에 적용할 점 2~3개 (문자열 배열)
+- takeaways: {audience}이 삶에 적용할 점 2~3개 (문자열 배열)
 - tags: 설교의 주제 태그 2~4개 (짧은 한국어 명사, 문자열 배열. 예: 불안, 관계, 전도, 순종)
 
 영상 제목: {title}
@@ -54,41 +61,42 @@ def save_seen(seen):
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=1), encoding="utf-8")
 
 
-def video(vid, title, published, description):
+def uploads_playlist(ch):
+    return f"UU{ch['id'][2:]}"  # 채널 ID(UC...)에서 업로드 목록 ID(UU...)를 만든다
+
+
+def video(vid, title, published, description, ch):
     return {"id": vid, "url": f"https://www.youtube.com/watch?v={vid}", "title": html.unescape(title),
-            "published": datetime.fromisoformat(published.replace("Z", "+00:00")), "description": description}
+            "published": datetime.fromisoformat(published.replace("Z", "+00:00")), "description": description,
+            "channel": ch}
 
 
-def fetch_via_api(key):
-    """YouTube Data API(공식). 클라우드 서버에서도 안정적으로 동작한다."""
-    r = requests.get(
-        "https://www.googleapis.com/youtube/v3/playlistItems",
-        params={"part": "snippet,contentDetails", "playlistId": f"UU{CHANNEL_ID[2:]}",
-                "maxResults": 20, "key": key},
-        timeout=30,
-    )
+def api_items(key, ch, page_size=20, token=None):
+    params = {"part": "snippet,contentDetails", "playlistId": uploads_playlist(ch),
+              "maxResults": page_size, "key": key}
+    if token:
+        params["pageToken"] = token
+    r = requests.get("https://www.googleapis.com/youtube/v3/playlistItems", params=params, timeout=30)
     r.raise_for_status()
-    return [video(i["contentDetails"]["videoId"], i["snippet"]["title"],
-                  i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
-                  i["snippet"].get("description", ""))
-            for i in r.json()["items"]]
+    data = r.json()
+    items = [video(i["contentDetails"]["videoId"], i["snippet"]["title"],
+                   i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
+                   i["snippet"].get("description", ""), ch)
+             for i in data["items"]]
+    return items, data.get("nextPageToken")
 
 
-def fetch_all_via_api(key, max_items=300):
+def fetch_via_api(key, ch):
+    """YouTube Data API(공식). 클라우드 서버에서도 안정적으로 동작한다."""
+    return api_items(key, ch, page_size=30)[0]
+
+
+def fetch_all_via_api(key, ch=YOUTH, max_items=300):
     """업로드 목록 전체(최신순)를 페이지 단위로 가져온다."""
     out, token = [], None
     while len(out) < max_items:
-        params = {"part": "snippet,contentDetails", "playlistId": f"UU{CHANNEL_ID[2:]}",
-                  "maxResults": 50, "key": key}
-        if token:
-            params["pageToken"] = token
-        r = requests.get("https://www.googleapis.com/youtube/v3/playlistItems", params=params, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        out += [video(i["contentDetails"]["videoId"], i["snippet"]["title"],
-                      i["contentDetails"].get("videoPublishedAt") or i["snippet"]["publishedAt"],
-                      i["snippet"].get("description", "")) for i in data["items"]]
-        token = data.get("nextPageToken")
+        items, token = api_items(key, ch, page_size=50, token=token)
+        out += items
         if not token:
             break
     return out
@@ -100,7 +108,7 @@ def library_path(v):
 
 def save_library(v, info):
     """설교 하나당 JSON 파일 하나로 저장한다 (나중에 대시보드의 데이터가 된다)."""
-    if DRY_RUN:
+    if DRY_RUN or not v["channel"]["library"]:
         return
     LIBRARY_DIR.mkdir(exist_ok=True)
     record = {
@@ -108,21 +116,22 @@ def save_library(v, info):
         "video_title": v["title"], "title": info.get("title", ""), "scripture": info.get("scripture", ""),
         "preacher": info.get("preacher", ""), "summary": info.get("summary", ""),
         "takeaways": info.get("takeaways", []), "tags": info.get("tags", []),
-        "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg",
+        "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg", "channel": v["channel"]["name"],
     }
     library_path(v).write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def fetch_via_rss():
+def fetch_via_rss(ch):
     """RSS는 가끔 404/500을 내고 클라우드 IP는 막히기도 해서 여러 번 시도한다."""
-    urls = [FEED_URL, UPLOADS_FEED_URL]
+    urls = [f"https://www.youtube.com/feeds/videos.xml?channel_id={ch['id']}",
+            f"https://www.youtube.com/feeds/videos.xml?playlist_id={uploads_playlist(ch)}"]
     for attempt in range(8):
         try:
             r = requests.get(urls[attempt % 2], headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
             r.raise_for_status()
             entries = feedparser.parse(r.content).entries
             if entries:
-                return [video(e.yt_videoid, e.title, e.published, e.get("summary", "")) for e in entries]
+                return [video(e.yt_videoid, e.title, e.published, e.get("summary", ""), ch) for e in entries]
         except requests.RequestException as e:
             print(f"피드 재시도 {attempt + 1}: {e}", file=sys.stderr)
         time.sleep(4 * (attempt + 1))
@@ -130,18 +139,40 @@ def fetch_via_rss():
 
 
 def fetch_videos():
-    """최신순 영상 목록. 실패하면 None."""
+    """모든 채널의 최신 영상 목록. 가져온 채널이 하나도 없으면 None."""
     key = os.environ.get("YOUTUBE_API_KEY")
-    if key:
-        try:
-            return fetch_via_api(key)
-        except (requests.RequestException, KeyError) as e:
-            print(f"YouTube API 실패: {type(e).__name__}", file=sys.stderr)
-    return fetch_via_rss()
+    out, ok = [], 0
+    for ch in CHANNELS:
+        items = None
+        if key:
+            try:
+                items = fetch_via_api(key, ch)
+            except (requests.RequestException, KeyError) as e:
+                print(f"[{ch['name']}] YouTube API 실패: {type(e).__name__}", file=sys.stderr)
+        if items is None:
+            items = fetch_via_rss(ch)
+        if items is None:
+            print(f"[{ch['name']}] 영상 목록을 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
+            continue
+        ok += 1
+        out += items
+    return out if ok else None
 
 
 def is_sermon(title):
-    return any(k in title for k in SERMON_KEYWORDS)
+    return any(k in title for k in SERMON_KEYWORDS) and not LIVE_PATTERN.search(title)
+
+
+def as_info(data):
+    """Gemini가 객체 대신 [객체] 목록을 돌려주는 일이 있어 정리한다. 형식이 이상하면 예외 -> 다른 모델로 재시도."""
+    if isinstance(data, list):
+        data = next((x for x in data if isinstance(x, dict)), None)
+    if not isinstance(data, dict) or not data.get("summary"):
+        raise ValueError("예상하지 못한 응답 형식")
+    for k in ("takeaways", "tags"):  # 문자열 배열이어야 한다
+        if not isinstance(data.get(k), list):
+            data[k] = []
+    return data
 
 
 def generate_json(contents):
@@ -161,7 +192,7 @@ def generate_json(contents):
                     model=model, contents=contents,
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
                 )
-                return json.loads(resp.text)
+                return as_info(json.loads(resp.text))
             except errors.ClientError as e:  # 모델 없음/한도 초과/영상 거부 등은 모델마다 다를 수 있어 다음 모델로
                 print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
                 last = e
@@ -172,26 +203,30 @@ def generate_json(contents):
     raise last
 
 
-def summarize_with_video(url, title, description):
+def prompt_for(ch, title, description):
+    return PROMPT.format(channel=ch["footer"], audience=ch["audience"], title=title, description=description)
+
+
+def summarize_with_video(url, ch, title, description):
     from google.genai import types
 
     return generate_json(types.Content(parts=[
         types.Part(file_data=types.FileData(file_uri=url)),
-        types.Part(text=PROMPT.format(title=title, description=description)),
+        types.Part(text=prompt_for(ch, title, description)),
     ]))
 
 
-def summarize_with_transcript(video_id, title, description):
+def summarize_with_transcript(video_id, ch, title, description):
     from youtube_transcript_api import YouTubeTranscriptApi
 
     transcript = " ".join(t.text for t in YouTubeTranscriptApi().fetch(video_id, languages=["ko"]))
-    return generate_json(PROMPT.format(title=title, description=description) + "\n\n[설교 자막]\n" + transcript)
+    return generate_json(prompt_for(ch, title, description) + "\n\n[설교 자막]\n" + transcript)
 
 
-def summarize(video_id, url, title, description):
+def summarize(video_id, url, ch, title, description):
     for name, fn in (
-        ("영상 직접 분석", lambda: summarize_with_video(url, title, description)),
-        ("자막 분석", lambda: summarize_with_transcript(video_id, title, description)),
+        ("영상 직접 분석", lambda: summarize_with_video(url, ch, title, description)),
+        ("자막 분석", lambda: summarize_with_transcript(video_id, ch, title, description)),
     ):
         try:
             return fn()
@@ -200,7 +235,7 @@ def summarize(video_id, url, title, description):
     return None
 
 
-def render_email(info, url, published):
+def render_email(info, url, published, ch):
     takeaways = "".join(f"<li>{html.escape(t)}</li>" for t in info.get("takeaways", []))
     summary = html.escape(info.get("summary", "")).replace("\n", "<br>")
     body = f"""
@@ -211,7 +246,7 @@ def render_email(info, url, published):
   <p><a href="{url}" style="background:#c00;color:#fff;padding:8px 14px;text-decoration:none;border-radius:4px">▶ 영상 보기</a></p>
   <h3>설교 요약</h3><p>{summary}</p>
   {'<h3>적용 포인트</h3><ul>' + takeaways + '</ul>' if takeaways else ''}
-  <hr><p style="color:#999;font-size:12px">분당우리교회 청년교구 유튜브 새 설교 자동 알림 (AI 요약이라 부정확할 수 있어요)</p>
+  <hr><p style="color:#999;font-size:12px">{ch['footer']} 유튜브 새 설교 자동 알림 (AI 요약이라 부정확할 수 있어요)</p>
 </div>"""
     text = (f"{info.get('title', '')}\n본문: {info.get('scripture', '')}\n설교자: {info.get('preacher', '')}\n"
             f"{url}\n\n{info.get('summary', '')}\n")
@@ -238,7 +273,7 @@ def main():
         backfill()
         return
     videos = fetch_videos()
-    if videos is None:  # 일시적 장애: 실패로 처리하지 않고 다음 실행(30분 뒤)에 재시도
+    if videos is None:  # 일시적 장애: 실패로 처리하지 않고 다음 실행에 재시도
         print("유튜브 영상 목록을 가져오지 못했습니다. 다음 실행에서 다시 시도합니다.", file=sys.stderr)
         return
     seen = load_seen()
@@ -249,15 +284,24 @@ def main():
         return
     seen = set(seen)
 
+    for ch in CHANNELS:  # 새로 추가한 채널의 첫 확인: 과거 영상은 보내지 않고 기록만 한다
+        ids = {v["id"] for v in videos if v["channel"] is ch}
+        if ids and not ids & seen:
+            seen |= ids
+            print(f"[{ch['name']}] 새 채널 첫 확인: 기존 영상 {len(ids)}개를 기록만 했습니다.")
+            if not DRY_RUN:
+                save_seen(seen)
+
     now = datetime.now(timezone.utc)
     kst = timezone(timedelta(hours=9))
-    for v in [v for v in reversed(videos) if v["id"] not in seen]:
-        vid, url, title, published = v["id"], v["url"], v["title"], v["published"]
+    pending = sorted((v for v in videos if v["id"] not in seen), key=lambda v: v["published"])  # 오래된 것부터
+    for v in pending:
+        vid, url, title, published, ch = v["id"], v["url"], v["title"], v["published"], v["channel"]
         if not is_sermon(title) or now - published > MAX_AGE:
             print(f"설교가 아니거나 오래된 영상, 기록만 함: {title}")
             seen.add(vid)
             continue
-        info = summarize(vid, url, title, v["description"])
+        info = summarize(vid, url, ch, title, v["description"])
         if info is None:
             if now - published < GIVE_UP_AFTER:
                 print(f"요약 실패, 다음 실행에서 재시도: {title}")
@@ -266,8 +310,8 @@ def main():
                     "summary": "요약을 만들지 못했습니다. 영상 링크에서 확인해주세요.", "takeaways": []}
         else:
             save_library(v, info)
-        body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"))
-        send_mail(f"[청년교구 새 설교] {info.get('title', title)}", body_html, body_text)
+        body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"), ch)
+        send_mail(f"[{ch['name']} 새 설교] {info.get('title', title)}", body_html, body_text)
         print(f"발송 완료: {title}")
         seen.add(vid)
         if not DRY_RUN:
@@ -279,18 +323,26 @@ def main():
 
 
 def backfill():
+    """부가 작업이라 오류가 나도 실행 전체를 실패로 만들지 않는다 (실패 알림 메일 방지)."""
+    try:
+        _backfill()
+    except Exception as e:
+        print(f"백필 오류(무시하고 다음에 다시 시도): {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+
+
+def _backfill():
     """BACKFILL=N 이면 라이브러리에 없는 지난 설교를 최대 N편 요약해 저장한다 (메일은 보내지 않음)."""
     limit = int(os.environ.get("BACKFILL", "0"))
     key = os.environ.get("YOUTUBE_API_KEY")
     if limit <= 0 or not key:
         return
     done = fails = 0
-    for v in fetch_all_via_api(key):  # 최신순
+    for v in fetch_all_via_api(key, YOUTH):  # 최신순 (라이브러리는 청년교구만)
         if done >= limit:
             break
         if not is_sermon(v["title"]) or library_path(v).exists():
             continue
-        info = summarize(v["id"], v["url"], v["title"], v["description"])
+        info = summarize(v["id"], v["url"], YOUTH, v["title"], v["description"])
         if info is None:
             fails += 1
             print(f"백필 실패: {v['title']}", file=sys.stderr)
