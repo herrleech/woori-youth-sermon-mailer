@@ -22,7 +22,8 @@ CHANNELS = [
      "audience": "성도들", "library": False},  # @BundangWooriChurch
 ]
 YOUTH = CHANNELS[0]
-LIVE_PATTERN = re.compile(r"생방송|라이브|🔴|\blive\b", re.I)  # 방송 중인 영상은 요약할 수 없다
+EXCLUDE_KEYWORDS = ("새벽기도회",)  # 제목에 포함되면 메일을 보내지 않는다 (필요하면 여기에 추가)
+LIVE_PATTERN =re.compile(r"생방송|라이브|🔴|\blive\b", re.I)  # 방송 중인 영상은 요약할 수 없다
 SEEN_FILE = Path(__file__).with_name("seen.json")
 LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
@@ -160,7 +161,8 @@ def fetch_videos():
 
 
 def is_sermon(title):
-    return any(k in title for k in SERMON_KEYWORDS) and not LIVE_PATTERN.search(title)
+    return (any(k in title for k in SERMON_KEYWORDS) and not LIVE_PATTERN.search(title)
+            and not any(k in title for k in EXCLUDE_KEYWORDS))
 
 
 def as_info(data):
