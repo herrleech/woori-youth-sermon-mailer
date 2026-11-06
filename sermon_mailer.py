@@ -42,7 +42,8 @@ PROMPT = """다음은 {channel} 설교 영상입니다. 영상을 듣고 아래 
 - title: 설교 제목 (영상 제목에서 날짜/교회명/부서명을 뺀 설교 제목)
 - scripture: 본문 성경구절 (예: 열왕기상 12장 25-33절). 모르면 "확인되지 않음"
 - preacher: 설교자 (예: 지원일 목사)
-- summary: 설교 내용을 한국어로 정리한 글. 핵심 메시지 한 줄 + 3~5개 소제목별 요점 (총 400~700자)
+- key_message: 설교의 핵심 메시지 한 문장 (60자 이내)
+- points: 설교의 흐름을 3~5개 요점으로 나눈 객체 배열. 각 객체는 heading(요점 소제목, 20자 이내)과 body(그 요점의 설명, 2~3문장)를 가진다
 - takeaways: {audience}이 삶에 적용할 점 2~3개 (문자열 배열)
 - tags: 설교의 주제 태그 2~4개 (짧은 한국어 명사, 문자열 배열. 예: 불안, 관계, 전도, 순종)
 
@@ -116,6 +117,7 @@ def save_library(v, info):
         "video_id": v["id"], "url": v["url"], "published": v["published"].isoformat(),
         "video_title": v["title"], "title": info.get("title", ""), "scripture": info.get("scripture", ""),
         "preacher": info.get("preacher", ""), "summary": info.get("summary", ""),
+        "key_message": info.get("key_message", ""), "points": info.get("points", []),
         "takeaways": info.get("takeaways", []), "tags": info.get("tags", []),
         "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg", "channel": v["channel"]["name"],
     }
@@ -169,8 +171,19 @@ def as_info(data):
     """Gemini가 객체 대신 [객체] 목록을 돌려주는 일이 있어 정리한다. 형식이 이상하면 예외 -> 다른 모델로 재시도."""
     if isinstance(data, list):
         data = next((x for x in data if isinstance(x, dict)), None)
-    if not isinstance(data, dict) or not data.get("summary"):
+    if not isinstance(data, dict):
         raise ValueError("예상하지 못한 응답 형식")
+    raw = data.get("points") if isinstance(data.get("points"), list) else []
+    data["points"] = [{"heading": str(p.get("heading", "")).strip(), "body": str(p["body"]).strip()}
+                      for p in raw if isinstance(p, dict) and p.get("body")]
+    data["key_message"] = str(data.get("key_message") or "").strip()
+    if data["points"]:  # 요약 문자열은 코드가 직접 만든다 (모델이 줄바꿈을 빼먹어도 읽기 좋게)
+        blocks = [data["key_message"]] if data["key_message"] else []
+        blocks += [f"{i}. {p['heading']}\n{p['body']}" if p["heading"] else f"{i}. {p['body']}"
+                   for i, p in enumerate(data["points"], 1)]
+        data["summary"] = "\n\n".join(blocks)
+    elif not data.get("summary"):
+        raise ValueError("요약 내용이 없는 응답")
     for k in ("takeaways", "tags"):  # 문자열 배열이어야 한다
         if not isinstance(data.get(k), list):
             data[k] = []
@@ -238,17 +251,30 @@ def summarize(video_id, url, ch, title, description):
 
 
 def render_email(info, url, published, ch):
-    takeaways = "".join(f"<li>{html.escape(t)}</li>" for t in info.get("takeaways", []))
-    summary = html.escape(info.get("summary", "")).replace("\n", "<br>")
+    esc = html.escape
+    h3 = "margin:28px 0 10px;font-size:17px;color:#1f3d34"
+    takeaways = "".join(f'<li style="margin:0 0 8px">{esc(t)}</li>' for t in info.get("takeaways", []))
+    if info.get("points"):  # 핵심 메시지 상자 + 요점마다 소제목/본문 (문단 사이를 넉넉히 띄운다)
+        key = info.get("key_message", "")
+        summary_html = (f'<div style="background:#eef4f1;border-left:4px solid #2f5d50;padding:14px 16px;'
+                        f'margin:0 0 8px;font-size:16px;font-weight:bold">{esc(key)}</div>' if key else "")
+        summary_html += "".join(
+            f'<h4 style="margin:22px 0 6px;font-size:16px">{i}. {esc(p["heading"])}</h4>'
+            f'<p style="margin:0">{esc(p["body"])}</p>' if p["heading"] else
+            f'<p style="margin:14px 0 0">{i}. {esc(p["body"])}</p>'
+            for i, p in enumerate(info["points"], 1))
+    else:  # 요점 구조가 없는 요약(요약 실패 안내 등)은 빈 줄 기준으로 문단을 나눈다
+        paras = [p.strip() for p in info.get("summary", "").split("\n\n") if p.strip()]
+        summary_html = "".join(f'<p style="margin:0 0 14px">{esc(p).replace(chr(10), "<br>")}</p>' for p in paras)
     body = f"""
-<div style="font-family:'Malgun Gothic',sans-serif;max-width:640px;margin:auto;line-height:1.7;color:#222">
-  <h2 style="margin-bottom:4px">{html.escape(info.get('title', ''))}</h2>
-  <p style="margin:0;color:#555">📖 {html.escape(info.get('scripture', ''))} &nbsp;|&nbsp; 🎤 {html.escape(info.get('preacher', ''))}</p>
+<div style="font-family:'Malgun Gothic',sans-serif;max-width:640px;margin:auto;padding:16px 18px;line-height:1.85;font-size:15px;color:#222;background:#ffffff">
+  <h2 style="margin:0 0 6px;font-size:22px;line-height:1.4">{esc(info.get('title', ''))}</h2>
+  <p style="margin:0;color:#555">📖 {esc(info.get('scripture', ''))} &nbsp;|&nbsp; 🎤 {esc(info.get('preacher', ''))}</p>
   <p style="margin:4px 0 16px;color:#888;font-size:13px">{published}</p>
-  <p><a href="{url}" style="background:#c00;color:#fff;padding:8px 14px;text-decoration:none;border-radius:4px">▶ 영상 보기</a></p>
-  <h3>설교 요약</h3><p>{summary}</p>
-  {'<h3>적용 포인트</h3><ul>' + takeaways + '</ul>' if takeaways else ''}
-  <hr><p style="color:#999;font-size:12px">{ch['footer']} 유튜브 새 설교 자동 알림 (AI 요약이라 부정확할 수 있어요)</p>
+  <p style="margin:0"><a href="{url}" style="background:#c00;color:#fff;padding:9px 16px;text-decoration:none;border-radius:4px;display:inline-block">▶ 영상 보기</a></p>
+  <h3 style="{h3}">설교 요약</h3>{summary_html}
+  {f'<h3 style="{h3}">적용 포인트</h3><ul style="margin:0;padding-left:22px">{takeaways}</ul>' if takeaways else ''}
+  <hr style="margin:32px 0 12px;border:0;border-top:1px solid #ddd"><p style="color:#999;font-size:12px;margin:0">{ch['footer']} 유튜브 새 설교 자동 알림 (AI 요약이라 부정확할 수 있어요)</p>
 </div>"""
     text = (f"{info.get('title', '')}\n본문: {info.get('scripture', '')}\n설교자: {info.get('preacher', '')}\n"
             f"{url}\n\n{info.get('summary', '')}\n")
