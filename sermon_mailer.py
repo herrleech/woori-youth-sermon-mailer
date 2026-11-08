@@ -146,6 +146,7 @@ def save_to_firestore(record):
         from firebase_admin import firestore
 
         db.collection("sermons").document(record["video_id"]).set({**record, "updatedAt": firestore.SERVER_TIMESTAMP})
+        print(f"Firestore 저장 완료: {record['video_id']}")
     except Exception as e:
         print(f"Firestore 저장 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
 
