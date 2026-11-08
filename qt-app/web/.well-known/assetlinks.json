@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.web.qtsermon",
+      "sha256_cert_fingerprints": [
+        "3F:AD:8B:97:A7:CC:43:B4:B5:E6:91:5D:FF:58:2C:AF:2F:BD:91:ED:FD:30:CA:F0:2C:95:17:DC:C8:D4:F6:D7"
+      ]
+    }
+  }
+]

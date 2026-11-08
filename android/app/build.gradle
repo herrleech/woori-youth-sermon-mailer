@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 웹앱(https://qtsermon.web.app)을 여는 얇은 껍데기(TWA). 내용은 사이트에서 오므로 사이트를 배포하면 앱에 바로 반영된다.
+android {
+    namespace 'app.web.qtsermon'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.web.qtsermon'
+        minSdk 21
+        targetSdk 34
+        // 업데이트 설치는 versionCode 가 커야 한다 -> 빌드 워크플로가 실행 번호를 넣는다
+        versionCode (System.getenv('VERSION_CODE') ?: '1') as Integer
+        versionName System.getenv('VERSION_NAME') ?: '1.0'
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('KEYSTORE_PATH') ?: 'missing.keystore')
+            storePassword System.getenv('KEYSTORE_PASSWORD')
+            keyAlias System.getenv('KEY_ALIAS') ?: 'qtapp'
+            keyPassword System.getenv('KEYSTORE_PASSWORD')
+            storeType 'pkcs12'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}
