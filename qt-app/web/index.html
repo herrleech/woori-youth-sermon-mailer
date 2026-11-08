@@ -3,32 +3,59 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#4a90e2">
+<meta name="theme-color" content="#f6f6f6">
 <title>한 구절 묵상</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<script>
+// 화면 테마(시스템/라이트/다크): 첫 화면을 그리기 전에 적용해서 깜빡임을 막는다. 설정 화면이 window.applyTheme 를 호출한다.
+(function () {
+  var mq = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
+  try { window.__theme = localStorage.getItem("qt.theme") || "system"; } catch (e) { window.__theme = "system"; }
+  window.applyTheme = function (pref) {
+    if (pref) { window.__theme = pref; try { localStorage.setItem("qt.theme", pref); } catch (e) { /* ignore */ } }
+    var dark = window.__theme === "dark" || (window.__theme === "system" && mq && mq.matches);
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.content = dark ? "#000000" : "#f6f6f6";
+  };
+  window.applyTheme();
+  if (mq && mq.addEventListener) mq.addEventListener("change", function () { if (window.__theme === "system") window.applyTheme(); });
+})();
+</script>
 <link rel="stylesheet" href="vendor/quill.snow.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v15H5.5C4.7 19 4 18.3 4 17.5z"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H13v15h5.5c.8 0 1.5-.7 1.5-1.5z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v3"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2 2 0 012.8 0l.2.2a2 2 0 010 2.8L8 19z"/><path d="M14.5 6.5l3 3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></symbol>
+</defs></svg>
+
 <div id="login" class="login" hidden>
-  <h1>한 구절 묵상</h1>
-  <p>나만의 QT 라이브러리</p>
-  <button id="btn-login" class="btn primary">Google로 로그인</button>
+  <div class="login-card">
+    <div class="logo"><svg class="i"><use href="#i-book"/></svg></div>
+    <h1>한 구절 묵상</h1>
+    <p>나만의 QT · 설교 라이브러리</p>
+    <button id="btn-login" class="btn primary big">Google로 로그인</button>
+  </div>
 </div>
 <div id="app" hidden>
   <header class="top">
-    <a class="brand" href="#/">한 구절 묵상</a>
     <span id="offline" class="offbadge" hidden>오프라인</span>
     <span id="sync" class="sync" title="동기화 상태"></span>
   </header>
   <main id="view"></main>
   <nav class="tabbar" aria-label="메뉴">
-    <a href="#/" data-nav="home"><span class="ic">📖</span>오늘</a>
-    <a href="#/sermons" data-nav="sermons"><span class="ic">🎙</span>설교</a>
-    <a href="#/notes" data-nav="notes"><span class="ic">✎</span>노트</a>
-    <a href="#/settings" data-nav="settings"><span class="ic">⚙</span>설정</a>
+    <a href="#/" data-nav="home"><span class="cap"><svg class="i"><use href="#i-book"/></svg></span>오늘</a>
+    <a href="#/sermons" data-nav="sermons"><span class="cap"><svg class="i"><use href="#i-mic"/></svg></span>설교</a>
+    <a href="#/notes" data-nav="notes"><span class="cap"><svg class="i"><use href="#i-pen"/></svg></span>노트</a>
+    <a href="#/settings" data-nav="settings"><span class="cap"><svg class="i"><use href="#i-gear"/></svg></span>설정</a>
   </nav>
 </div>
 <div id="sheet" class="sheet" hidden>

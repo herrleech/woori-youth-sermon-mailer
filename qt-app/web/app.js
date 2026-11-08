@@ -93,6 +93,7 @@ function matches(qt) {
 
 function renderHome() {
   view.innerHTML = `
+    <div class="head"><h1>오늘의 QT</h1></div>
     <div class="bar">
       <input id="f-q" class="grow" type="search" placeholder="키워드 검색 (제목·본문·묵상·내 기록)" value="${esc(filter.q)}">
       <button id="f-toggle" class="btn small ${filter.open ? "on" : ""}">필터</button>
@@ -187,7 +188,7 @@ function renderDetail(date) {
   view.innerHTML = `
     <div class="detail">
       <div class="page-head">
-        <a class="btn small" href="#/">← 목록</a>
+        <a class="btn small back" href="#/" aria-label="목록으로"><svg class="i"><use href="#i-left"/></svg></a>
         <span class="date">${fmtDate(qt.date)}</span>
         <span style="margin-left:auto;display:flex;gap:6px">
           ${older ? `<a class="btn small" href="#/qt/${older.date}">‹ 이전</a>` : ""}
@@ -321,6 +322,7 @@ const byKo = (a, b) => a.localeCompare(b, "ko");
 
 function renderSermons() {
   view.innerHTML = `
+    <div class="head"><h1>설교</h1></div>
     <div class="bar">
       <input id="s-q" class="grow" type="search" placeholder="제목·본문·설교자·내용 검색" value="${esc(sfilter.q)}">
       <button id="s-toggle" class="btn small ${sfilter.open ? "on" : ""}">필터</button>
@@ -397,7 +399,7 @@ function renderSermon(id) {
   view.innerHTML = `
     <div class="detail sermon">
       <div class="page-head">
-        <a class="btn small" href="#/sermons">← 목록</a>
+        <a class="btn small back" href="#/sermons" aria-label="목록으로"><svg class="i"><use href="#i-left"/></svg></a>
         <span class="date">${fmtDate(s._ymd)} · ${esc(s.channel)}</span>
         <span style="margin-left:auto;display:flex;gap:6px">${nav(older, "‹ 이전")}${nav(newer, "다음 ›")}</span>
       </div>
@@ -439,9 +441,16 @@ function openNoteForSermon(s) {
 function renderSettings() {
   view.innerHTML = `
     <div class="settings">
-      <section class="sec"><h2>계정</h2>
-        <div class="txt">${esc((currentUser && (currentUser.email || currentUser.name)) || "")}${isFirebase ? "" : " (로컬 데모 모드)"}</div>
-        ${isFirebase ? `<p><button id="st-logout" class="btn">로그아웃</button></p>` : ""}</section>
+      <div class="head"><h1>설정</h1></div>
+      <section class="sec"><div class="avatar-row">
+        <div class="avatar">${esc(((currentUser && (currentUser.name || currentUser.email)) || "나").trim().charAt(0).toUpperCase())}</div>
+        <div><div style="font-weight:700;font-size:17px">${esc((currentUser && currentUser.name) || "나")}</div>
+        <div class="hint">${esc((currentUser && currentUser.email) || "")}${isFirebase ? "" : "로컬 데모 모드"}</div></div></div>
+        ${isFirebase ? `<p style="margin-top:14px"><button id="st-logout" class="btn">로그아웃</button></p>` : ""}</section>
+      <section class="sec"><h2>화면</h2>
+        <div class="seg" id="st-theme">
+          <button data-v="system">시스템 설정</button><button data-v="light">라이트</button><button data-v="dark">다크</button>
+        </div></section>
       <section class="sec"><h2>백업</h2>
         <p class="hint">내 노트와 QT 기록을 JSON 파일로 저장하거나 가져옵니다.</p>
         <button id="st-backup" class="btn">⇅ 백업 · 가져오기</button></section>
@@ -453,6 +462,10 @@ function renderSettings() {
   const draw = () => { $("#st-counts").textContent = `QT ${qtList.length}개 · 설교 ${sermons.length}편 · 노트 ${notes.length}개`; };
   $("#st-backup").onclick = openBackup;
   const lo = $("#st-logout"); if (lo) lo.onclick = () => store.signOut();
+  const seg = $("#st-theme");
+  const markTheme = () => seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === (window.__theme || "system")));
+  seg.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; window.applyTheme(b.dataset.v); markTheme(); });
+  markTheme();
   listeners.add(draw); draw();
   let alive = true;
   drawPush($("#st-push"), () => alive && location.hash === "#/settings");
@@ -503,6 +516,7 @@ async function drawPush(box, alive) {
 let noteQ = "";
 function renderNotes() {
   view.innerHTML = `
+    <div class="head"><h1>노트</h1></div>
     <div class="bar">
       <input id="n-q" class="grow" type="search" placeholder="메모 검색" value="${esc(noteQ)}">
       <button id="n-new" class="btn primary small">＋ 새 메모</button>
@@ -549,7 +563,7 @@ function renderNote(id) {
   setupQuill();
   const sizes = ["12px", "14px", "16px", "18px", "20px", "24px", "28px", "32px"];
   view.innerHTML = `
-    <div class="page-head"><a class="btn small" href="#/notes">← 목록</a>
+    <div class="page-head"><a class="btn small back" href="#/notes" aria-label="목록으로"><svg class="i"><use href="#i-left"/></svg></a>
       <span id="n-state" class="savestate" style="margin-left:auto"></span>
       <button id="n-del" class="btn small ghost">삭제</button></div>
     <input id="n-title" class="note-title" placeholder="설교 제목" maxlength="200">
