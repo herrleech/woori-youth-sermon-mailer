@@ -1,0 +1,44 @@
+name: restructure-library
+
+on:
+  workflow_dispatch:   # 수동 실행: 소제목 없는 예전 요약을 소제목+문단 구조로 정리 (영상은 다시 보지 않음, 여러 번 실행해도 안전)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sermon-mailer   # 메일러/백필과 동시에 library 를 건드리지 않도록 같은 그룹
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restructure old summaries
+        timeout-minutes: 35
+        env:
+          BACKFILL_ONLY: "1"   # 호출당 재시도 없이 한 번만 (실패하면 다음 실행에서)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python scripts/restructure_library.py
+      - name: Build dashboard data
+        if: always()
+        run: python build_site.py
+      - name: Save library
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain library docs)" ]; then
+            git config user.name "sermon-bot"
+            git config user.email "sermon-bot@users.noreply.github.com"
+            git add library docs
+            git commit -m "restructure old summaries"
+            git pull --rebase
+            git push
+          fi
