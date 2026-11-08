@@ -1,4 +1,5 @@
 import { getStore, isFirebase, newId } from "./store.js";
+import { vapidKey } from "./firebase-config.js";
 import { BOOKS, findRefs, decodeRef, refLabel, bookOfText, parseFilter, parsePassage, DELIMS } from "./bible.js";
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -444,8 +445,7 @@ function renderSettings() {
       <section class="sec"><h2>백업</h2>
         <p class="hint">내 노트와 QT 기록을 JSON 파일로 저장하거나 가져옵니다.</p>
         <button id="st-backup" class="btn">⇅ 백업 · 가져오기</button></section>
-      <section class="sec"><h2>알림</h2>
-        <p class="hint">새 설교 · 매일 QT 알림은 다음 업데이트에서 추가됩니다.</p></section>
+      <section class="sec"><h2>알림</h2><div id="st-push"><p class="hint">확인하는 중…</p></div></section>
       <section class="sec"><h2>데이터</h2>
         <div id="st-counts" class="txt"></div>
         <div class="hint">앱 버전 ${esc(APP_VERSION)}</div></section>
@@ -454,7 +454,49 @@ function renderSettings() {
   $("#st-backup").onclick = openBackup;
   const lo = $("#st-logout"); if (lo) lo.onclick = () => store.signOut();
   listeners.add(draw); draw();
-  return () => listeners.delete(draw);
+  let alive = true;
+  drawPush($("#st-push"), () => alive && location.hash === "#/settings");
+  return () => { alive = false; listeners.delete(draw); };
+}
+
+// 알림 설정: 이 기기 등록/해제, 알림 종류 선택, 테스트
+async function drawPush(box, alive) {
+  const ok = await store.push.supported();
+  if (!alive()) return;
+  if (!isFirebase || !ok) { box.innerHTML = `<p class="hint">이 환경에서는 알림을 쓸 수 없습니다. 로그인한 Chrome이나 설치한 앱에서 사용하세요.</p>`; return; }
+  if (!vapidKey) { box.innerHTML = `<p class="hint">알림 키가 아직 설정되지 않았습니다. 설정이 끝나면 여기서 켤 수 있어요.</p>`; return; }
+  const perm = store.push.permission(), token = store.push.token();
+  if (perm === "denied") { box.innerHTML = `<p class="hint">알림이 차단되어 있습니다. 브라우저(또는 앱) 설정에서 이 사이트의 알림을 허용한 뒤 다시 열어주세요.</p>`; return; }
+  if (!token || perm !== "granted") {
+    box.innerHTML = `<p class="hint">새 설교가 올라오면, 그리고 매일 아침 QT 시간에 알림을 받을 수 있어요.</p>
+      <button id="pu-on" class="btn primary">이 기기에서 알림 받기</button>`;
+    $("#pu-on").onclick = async (e) => {
+      e.target.disabled = true;
+      try { await store.push.register(vapidKey, { newSermon: true, qtReminder: true }); toast("알림을 켰습니다"); }
+      catch (err) { toast(err.message || "알림을 켜지 못했습니다"); }
+      if (alive()) drawPush(box, alive);
+    };
+    return;
+  }
+  const dev = (await store.push.device(token).catch(() => null)) || {};
+  if (!alive()) return;
+  const prefs = { newSermon: dev.newSermon !== false, qtReminder: dev.qtReminder !== false };
+  box.innerHTML = `
+    <p class="hint">이 기기에서 알림을 받는 중입니다.</p>
+    <label class="check"><input type="checkbox" id="pu-sermon" ${prefs.newSermon ? "checked" : ""}> 새 설교가 올라오면</label>
+    <label class="check"><input type="checkbox" id="pu-qt" ${prefs.qtReminder ? "checked" : ""}> 매일 아침 QT 알림 (오전 7시 전후)</label>
+    <p style="margin-top:10px"><button id="pu-test" class="btn small">이 기기에서 테스트</button>
+      <button id="pu-off" class="btn small ghost">알림 끄기</button></p>`;
+  const save = () => store.push.savePrefs(token, { newSermon: $("#pu-sermon").checked, qtReminder: $("#pu-qt").checked })
+    .then(() => toast("저장했습니다"), (err) => toast("저장 실패: " + err.message));
+  $("#pu-sermon").onchange = save; $("#pu-qt").onchange = save;
+  $("#pu-test").onclick = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification("알림 테스트", { body: "이 기기에서 알림이 이렇게 표시됩니다", icon: "icons/icon-192.png", tag: "local-test", data: { hash: "#/settings" } });
+    } catch (err) { toast("테스트 실패: " + err.message); }
+  };
+  $("#pu-off").onclick = async () => { await store.push.unregister(); toast("알림을 껐습니다"); if (alive()) drawPush(box, alive); };
 }
 
 // ───────────── 설교 메모 목록 ─────────────
@@ -824,8 +866,13 @@ async function boot() {
     unsubs.push(store.subscribeEntries((l) => { entries = new Map(l.map((e) => [e.id, e])); notify(); }));
     unsubs.push(store.subscribeNotes((l) => { notes = l; notify(); }));
     unsubs.push(store.subscribeSermons((l) => { sermons = prepSermons(l); notify(); }));
+    if (isFirebase && vapidKey) store.push.supported().then((ok) => ok && store.push.refresh(vapidKey)).catch(() => {});
     route();
   });
 }
 boot();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  // 알림을 눌렀을 때 이미 열려 있는 앱을 해당 화면으로 이동
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.type === "navigate") location.hash = e.data.hash; });
+}

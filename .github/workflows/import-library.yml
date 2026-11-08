@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: qt-app/scraper/requirements.txt
-      - run: pip install firebase-admin
+      - run: pip install "firebase-admin>=6.5,<8"
       - name: Import library into Firestore
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

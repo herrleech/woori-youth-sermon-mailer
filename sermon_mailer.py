@@ -151,6 +151,26 @@ def save_to_firestore(record):
         print(f"Firestore 저장 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
 
 
+def push_new_sermon(v, info):
+    """새 설교를 앱 알림으로도 알린다 (알림을 켜둔 기기에만). 실패해도 메일 발송은 계속한다."""
+    if DRY_RUN or not v["channel"]["library"]:
+        return
+    try:
+        db = firestore_db()
+        if db is None:
+            return
+        import push
+
+        body = " · ".join(x for x in (info.get("scripture"), info.get("preacher")) if x)
+        if info.get("key_message"):
+            body += "\n" + info["key_message"]
+        sent, failed, removed = push.send(db, "newSermon", f"[{v['channel']['name']}] {info.get('title') or v['title']}",
+                                          body, f"#/sermon/{v['id']}", tag=v["id"])
+        print(f"푸시 알림: 성공 {sent}, 실패 {failed}, 만료 정리 {removed}")
+    except Exception as e:
+        print(f"푸시 알림 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+
+
 def save_library(v, info):
     """설교 하나당 JSON 파일 하나로 저장하고(대시보드 데이터), 앱용 Firestore에도 저장한다."""
     if DRY_RUN or not v["channel"]["library"]:
@@ -431,6 +451,7 @@ def main():
                     "summary": "요약을 만들지 못했습니다. 영상 링크에서 확인해주세요.", "takeaways": []}
         else:
             save_library(v, info)
+            push_new_sermon(v, info)
         body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"), ch)
         send_mail(f"[{ch['name']} 새 설교] {info.get('title', title)}", body_html, body_text)
         print(f"발송 완료: {title}")

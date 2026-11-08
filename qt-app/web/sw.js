@@ -1,10 +1,10 @@
 // 앱 셸 + 라이브러리를 미리 캐시해서 비행기 모드에서도 앱이 열린다. Firestore 요청은 가로채지 않는다
 // (Firestore 자체 오프라인 캐시가 데이터를 보관한다).
-const CACHE = "qt-shell-v11";
+const CACHE = "qt-shell-v12";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest",
   "vendor/quill.js", "vendor/quill.snow.css",
-  "vendor/firebase/firebase-app.js", "vendor/firebase/firebase-auth.js", "vendor/firebase/firebase-firestore.js",
+  "vendor/firebase/firebase-app.js", "vendor/firebase/firebase-auth.js", "vendor/firebase/firebase-firestore.js", "vendor/firebase/firebase-messaging.js",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon.svg",
 ];
 const EXTERNAL = ["i.ytimg.com"]; // 설교 썸네일: 한 번 본 것은 오프라인에서도 표시
@@ -39,4 +39,27 @@ self.addEventListener("fetch", (e) => {
       }
     })
   );
+});
+
+// ───── 푸시 알림 ─────
+// 서버(메일러/스케줄)가 FCM 으로 보낸 data 메시지를 받아 알림으로 보여준다. (알림 내용은 title/body/hash/tag)
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { const j = e.data ? e.data.json() : {}; d = j.data || j; } catch { d = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "한 구절 묵상", {
+    body: d.body || "", icon: "icons/icon-192.png", badge: "icons/icon-192.png",
+    tag: d.tag || undefined, data: { hash: d.hash || "#/" },
+  }));
+});
+// 알림을 누르면: 열려 있는 앱 창이 있으면 그 창을 해당 화면으로, 없으면 새로 연다
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const hash = (e.notification.data && e.notification.data.hash) || "#/";
+  e.waitUntil((async () => {
+    const wins = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const w of wins) {
+      if ("focus" in w) { await w.focus(); w.postMessage({ type: "navigate", hash }); return; }
+    }
+    await clients.openWindow("./" + hash);
+  })());
 });

@@ -46,6 +46,48 @@ async function makeFirebase() {
       const s = await F.getDoc(F.doc(db, "bible", `${bookNo}_${ch}`));
       return s.exists() ? s.data().verses : null;
     },
+    // ── 푸시 알림: 기기마다 users/{uid}/devices/{토큰} 문서를 두고, 서버가 이 목록으로 FCM 을 보낸다 ──
+    push: {
+      async supported() {
+        try {
+          if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+          return await (await import(FB + "firebase-messaging.js")).isSupported();
+        } catch { return false; }
+      },
+      permission: () => ("Notification" in window ? Notification.permission : "unsupported"),
+      token: () => { try { return localStorage.getItem("qt.pushToken") || ""; } catch { return ""; } },
+      async device(token) {
+        const s = await F.getDoc(F.doc(mine("devices"), token));
+        return s.exists() ? s.data() : null;
+      },
+      async register(vapidKey, prefs) {              // 권한 요청 + 토큰 발급 + 기기 등록
+        if ((await Notification.requestPermission()) !== "granted") throw new Error("알림 권한이 허용되지 않았습니다");
+        const M = await import(FB + "firebase-messaging.js");
+        const token = await M.getToken(M.getMessaging(app), { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready });
+        if (!token) throw new Error("알림 토큰을 받지 못했습니다");
+        await F.setDoc(F.doc(mine("devices"), token), { token, ...prefs, ua: navigator.userAgent.slice(0, 120), updatedAt: F.serverTimestamp() }, { merge: true });
+        try { localStorage.setItem("qt.pushToken", token); } catch { /* ignore */ }
+        return token;
+      },
+      savePrefs: (token, prefs) => F.setDoc(F.doc(mine("devices"), token), { ...prefs, updatedAt: F.serverTimestamp() }, { merge: true }),
+      async refresh(vapidKey) {                      // 앱을 열 때 토큰이 바뀌었으면 새 토큰으로 옮긴다 (설정은 유지)
+        const old = this.token();
+        if (!old || Notification.permission !== "granted") return;
+        const M = await import(FB + "firebase-messaging.js");
+        const token = await M.getToken(M.getMessaging(app), { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready });
+        if (!token || token === old) return;
+        const prev = await this.device(old);
+        await F.setDoc(F.doc(mine("devices"), token), { ...(prev || {}), token, updatedAt: F.serverTimestamp() }, { merge: true });
+        await F.deleteDoc(F.doc(mine("devices"), old)).catch(() => {});
+        try { localStorage.setItem("qt.pushToken", token); } catch { /* ignore */ }
+      },
+      async unregister() {
+        const token = this.token();
+        try { const M = await import(FB + "firebase-messaging.js"); await M.deleteToken(M.getMessaging(app)); } catch { /* 이미 만료 */ }
+        if (token) await F.deleteDoc(F.doc(mine("devices"), token)).catch(() => {});
+        try { localStorage.removeItem("qt.pushToken"); } catch { /* ignore */ }
+      },
+    },
   };
 }
 
@@ -107,6 +149,7 @@ function makeLocal() {
       LSset("qt.notes", n);
       emit();
     },
+    push: { supported: async () => false, permission: () => "unsupported", token: () => "", refresh: async () => {} },
     async getChapter(bookNo, ch) {
       const all = await fetch("demo/bible.json").then((r) => r.json()).catch(() => ({}));
       return all[`${bookNo}_${ch}`] || null;
