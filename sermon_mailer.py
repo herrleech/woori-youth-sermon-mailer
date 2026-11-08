@@ -219,12 +219,18 @@ def as_info(data):
         blocks += [f"{i}. {p['heading']}\n{p['body']}" if p["heading"] else f"{i}. {p['body']}"
                    for i, p in enumerate(data["points"], 1)]
         data["summary"] = "\n\n".join(blocks)
-    elif not data.get("summary"):
-        raise ValueError("요약 내용이 없는 응답")
     for k in ("takeaways", "tags"):  # 문자열 배열이어야 한다
         if not isinstance(data.get(k), list):
             data[k] = []
+    if not data["points"]:
+        if not data.get("summary"):
+            raise ValueError("요약 내용이 없는 응답")
+        raise NoPoints(data)  # 내용은 있지만 소제목 형식이 아님 -> 다른 모델을 먼저 시도하고, 안 되면 이 결과를 쓴다
     return data
+
+
+class NoPoints(ValueError):
+    """요약은 있으나 points(소제목+본문) 구조가 빠진 응답. args[0] 에 정리된 결과가 들어 있다."""
 
 
 def generate_json(contents):
@@ -235,7 +241,7 @@ def generate_json(contents):
     # 호출 하나가 몇 분씩 매달리지 않도록 시간 제한을 둔다 (혼잡한 모델은 503을 내기까지 오래 걸린다)
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
                           http_options=types.HttpOptions(timeout=CALL_TIMEOUT_MS))
-    last = None
+    last = unstructured = None
     for model in GEMINI_MODELS:
         for attempt, wait in enumerate(RETRY_WAITS):  # 서버 오류/시간 초과는 잠시 뒤 한 번 더
             time.sleep(wait)
@@ -245,6 +251,11 @@ def generate_json(contents):
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
                 )
                 return as_info(json.loads(resp.text))
+            except NoPoints as e:  # 소제목 없는 요약: 일단 보관해두고 다음 모델로 (형식을 지키는 모델을 찾는다)
+                print(f"모델 {model}: 소제목 형식이 아닌 응답, 다음 모델 시도", file=sys.stderr)
+                unstructured = unstructured or e.args[0]
+                last = e
+                break
             except errors.ClientError as e:  # 모델 없음/한도 초과/영상 거부 등은 모델마다 다를 수 있어 다음 모델로
                 print(f"모델 {model} 사용 불가({e.code}), 다음 모델 시도", file=sys.stderr)
                 last = e
@@ -252,6 +263,9 @@ def generate_json(contents):
             except Exception as e:  # 503/504, 시간 초과, 응답 형식 오류
                 print(f"모델 {model} 실패({type(e).__name__}), 시도 {attempt + 1}", file=sys.stderr)
                 last = e
+    if unstructured:  # 어떤 모델도 소제목 형식을 못 지켰으면, 요약 없이 실패하는 것보다 이 결과를 쓴다
+        print("소제목 형식을 지킨 응답이 없어 일반 요약을 사용합니다", file=sys.stderr)
+        return unstructured
     raise last
 
 
@@ -351,7 +365,28 @@ def send_test(video_id):
     print(f"테스트 발송 완료: {v['title']}")
 
 
+def add_to_library(ids):
+    """LIBRARY_VIDEOS=id1,id2 : 메일은 보내지 않고 그 영상들을 요약해 라이브러리/앱에만 저장한다.
+    (이미 메일이 나갔거나 과거에 기록만 한 설교를 보충할 때 쓴다. 최근 영상 목록에 있는 것만 가능)"""
+    videos = {v["id"]: v for v in (fetch_videos() or [])}
+    bad = 0
+    for vid in ids:
+        v = videos.get(vid)
+        info = v and summarize(vid, v["url"], v["channel"], v["title"], v["description"])
+        if not info:
+            print(f"라이브러리 추가 실패: {vid} ({'목록에 없음' if not v else '요약 실패'})", file=sys.stderr)
+            bad += 1
+            continue
+        save_library(v, info)
+        print(f"라이브러리 추가: {v['title']}")
+    if bad:
+        sys.exit(1)
+
+
 def main():
+    if os.environ.get("LIBRARY_VIDEOS", "").strip():
+        add_to_library([x.strip() for x in os.environ["LIBRARY_VIDEOS"].split(",") if x.strip()])
+        return
     if os.environ.get("TEST_VIDEO", "").strip():
         send_test(os.environ["TEST_VIDEO"].strip())
         return

@@ -2,14 +2,19 @@ name: check-new-sermon
 
 on:
   schedule:
-    # 매일 11:00~23:00 KST 한 시간 간격 + 23:30 KST 마지막 확인.
-    # cron은 UTC 기준(한국 시간 -9시간). GitHub 사정으로 몇 분~수 시간 지연되거나 빠질 수 있음
-    - cron: "0 2-14 * * *"   # 11:00 ~ 23:00 KST, 매시 정각
-    - cron: "30 14 * * *"    # 23:30 KST
+    # 매일 11:17~23:17 KST 한 시간 간격 + 23:47 KST 마지막 확인.
+    # cron은 UTC 기준(한국 시간 -9시간). GitHub는 정각에 몰리는 예약 실행을 자주 건너뛰어서(실측: 하루 14회 설정에 1~3회 실행)
+    # 일부러 정각을 피해 17분/47분으로 잡았다. 그래도 지연되거나 빠질 수 있다.
+    - cron: "17 2-14 * * *"  # 11:17 ~ 23:17 KST
+    - cron: "47 14 * * *"    # 23:47 KST
   workflow_dispatch:
     inputs:
       test_video:
         description: "테스트: 이 유튜브 영상 ID 하나만 메일로 보내본다 (기록은 건드리지 않음). 비워두면 평소처럼 실행"
+        required: false
+        default: ""
+      library_videos:
+        description: "보충: 이 영상 ID(쉼표로 여러 개)를 메일 없이 요약해 라이브러리/앱에만 추가한다 (최근 영상 목록에 있는 것만)"
         required: false
         default: ""
 
@@ -35,6 +40,7 @@ jobs:
         timeout-minutes: 25   # 이 단계가 시간 초과로 끊겨도 아래 저장 단계는 실행된다 (남은 설교는 다음 실행에서 처리)
         env:
           TEST_VIDEO: ${{ github.event.inputs.test_video }}
+          LIBRARY_VIDEOS: ${{ github.event.inputs.library_videos }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
