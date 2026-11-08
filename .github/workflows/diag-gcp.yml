@@ -1,0 +1,22 @@
+name: diag-gcp
+
+on:
+  workflow_dispatch:   # 진단용(읽기 전용): Firebase 프로젝트의 API 활성화 상태와 API 키 제한을 조회한다
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "firebase-admin>=6.5,<8" requests
+      - name: Inspect project APIs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python scripts/diag_gcp.py
