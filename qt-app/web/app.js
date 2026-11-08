@@ -38,7 +38,7 @@ let entries = new Map();
 let notes = [];
 let sermons = [];
 let currentUser = null;
-const APP_VERSION = "2.0 (설교 라이브러리 통합)";
+const APP_VERSION = "3.0 (설교·QT 통합, One UI 디자인)";
 const listeners = new Set();           // 데이터 변경 시 현재 뷰에 알림
 const notify = () => { listeners.forEach((f) => f()); schedulePrefetch(); };
 const syncDot = $("#sync");
