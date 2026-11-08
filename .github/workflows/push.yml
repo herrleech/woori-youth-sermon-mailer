@@ -31,10 +31,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: qt-app/scraper/requirements.txt
-      - run: pip install "firebase-admin>=6.5,<8"
+      - run: pip install "firebase-admin>=6.5" "pywebpush>=2.0"
       - name: Send push
         env:
           MODE: ${{ github.event.inputs.mode || 'qt-reminder' }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          WEBPUSH_VAPID_PRIVATE: ${{ secrets.WEBPUSH_VAPID_PRIVATE }}
         run: python scripts/send_push.py

@@ -2,4 +2,5 @@ feedparser==6.0.11
 requests>=2.32
 google-genai>=1.0
 youtube-transcript-api>=1.0
-firebase-admin>=6.5,<8  # 8 이후엔 Message.token 이 제거될 수 있어 상한을 둔다 (push.py)
+firebase-admin>=6.5
+pywebpush>=2.0

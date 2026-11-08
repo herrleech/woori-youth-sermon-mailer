@@ -153,7 +153,7 @@ def save_to_firestore(record):
 
 def push_new_sermon(v, info):
     """새 설교를 앱 알림으로도 알린다 (알림을 켜둔 기기에만). 실패해도 메일 발송은 계속한다."""
-    if DRY_RUN or not v["channel"]["library"]:
+    if DRY_RUN or not v["channel"]["library"] or not os.environ.get("WEBPUSH_VAPID_PRIVATE"):
         return
     try:
         db = firestore_db()

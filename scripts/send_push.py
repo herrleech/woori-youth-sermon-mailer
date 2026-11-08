@@ -4,6 +4,7 @@
 """
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,14 @@ if not raw:
     sys.exit("FIREBASE_SERVICE_ACCOUNT 환경변수가 없습니다")
 firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)))
 db = firestore.client()
+
+private = os.environ.get("WEBPUSH_VAPID_PRIVATE")
+if not private:
+    sys.exit("WEBPUSH_VAPID_PRIVATE 가 설정되지 않았습니다. GitHub Secret 으로 등록하세요 (README 참고)")
+app_pub = re.search(r'vapidKey\s*=\s*"([^"]+)"', (Path(__file__).resolve().parent.parent / "qt-app/web/firebase-config.js").read_text(encoding="utf-8")).group(1)
+if push.public_key_of(private) != app_pub:
+    sys.exit("비공개 키와 앱의 공개 키(firebase-config.js)가 짝이 아닙니다. 이 상태로는 푸시가 거부됩니다.")
+print("VAPID 키 짝 확인: 비공개 키와 앱의 공개 키가 일치합니다")
 
 mode = (os.environ.get("MODE") or "qt-reminder").strip()
 dry = os.environ.get("DRY_RUN") == "1"
@@ -38,15 +47,5 @@ sent, failed, removed = push.send(db, kind, title, body, hash_, tag=kind + "-" +
 print(f"[{mode}{' (검증만)' if dry else ''}] 대상 기기 성공 {sent}, 실패 {failed}, 만료 정리 {removed} | 제목: {title} | 내용: {body}")
 if sent == 0 and failed == 0 and removed == 0:
     print("등록된 기기가 없습니다. 앱 설정 > 알림에서 '이 기기에서 알림 받기'를 먼저 켜주세요.")
-    # 기기가 없어도 FCM 호출 권한/API 활성화 여부는 임시 토큰으로 점검할 수 있다 (dry_run: 실제로 보내지 않음)
-    from firebase_admin import exceptions, messaging
-    try:
-        messaging.send(messaging.Message(data={"a": "b"}, token="x" * 163), dry_run=True)
-        print("FCM 점검: 응답 OK")
-    except (exceptions.InvalidArgumentError, messaging.UnregisteredError):
-        print("FCM 점검: 정상 (임시 토큰이라 거부된 것은 예상된 결과 = FCM API/권한에 접근 가능)")
-    except Exception as e:
-        print(f"FCM 점검 실패: {type(e).__name__}: {str(e)[:300]}", file=sys.stderr)
-        sys.exit(1)
 if failed:
     sys.exit(1)

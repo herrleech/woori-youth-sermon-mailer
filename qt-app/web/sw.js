@@ -1,10 +1,10 @@
 // 앱 셸 + 라이브러리를 미리 캐시해서 비행기 모드에서도 앱이 열린다. Firestore 요청은 가로채지 않는다
 // (Firestore 자체 오프라인 캐시가 데이터를 보관한다).
-const CACHE = "qt-shell-v12";
+const CACHE = "qt-shell-v13";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest",
   "vendor/quill.js", "vendor/quill.snow.css",
-  "vendor/firebase/firebase-app.js", "vendor/firebase/firebase-auth.js", "vendor/firebase/firebase-firestore.js", "vendor/firebase/firebase-messaging.js",
+  "vendor/firebase/firebase-app.js", "vendor/firebase/firebase-auth.js", "vendor/firebase/firebase-firestore.js",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon.svg",
 ];
 const EXTERNAL = ["i.ytimg.com"]; // 설교 썸네일: 한 번 본 것은 오프라인에서도 표시

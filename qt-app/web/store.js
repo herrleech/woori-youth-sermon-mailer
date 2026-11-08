@@ -6,6 +6,15 @@ const FB = "./vendor/firebase/"; // Firebase JS SDK 10.14.1 (오프라인에서�
 
 export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// ── 웹 푸시 도우미 ──
+export const urlB64ToBytes = (s) => {
+  const p = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4);
+  return Uint8Array.from(atob(p), (c) => c.charCodeAt(0));
+};
+export const endpointId = async (endpoint) =>
+  [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
 let impl;
 
 // ───────────────────────── Firebase ─────────────────────────
@@ -46,46 +55,52 @@ async function makeFirebase() {
       const s = await F.getDoc(F.doc(db, "bible", `${bookNo}_${ch}`));
       return s.exists() ? s.data().verses : null;
     },
-    // ── 푸시 알림: 기기마다 users/{uid}/devices/{토큰} 문서를 두고, 서버가 이 목록으로 FCM 을 보낸다 ──
+    // ── 푸시 알림: 표준 웹 푸시(VAPID). 기기마다 users/{uid}/devices/{구독 해시} 문서를 두고, 서버가 이 구독으로 직접 보낸다 ──
+    // (Firebase 메시징 SDK 의 토큰 등록 API 를 거치지 않는다: 그 API 가 401 로 거부되는 문제를 피한다)
     push: {
-      async supported() {
-        try {
-          if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return false;
-          return await (await import(FB + "firebase-messaging.js")).isSupported();
-        } catch { return false; }
-      },
+      async supported() { return "Notification" in window && "serviceWorker" in navigator && "PushManager" in window; },
       permission: () => ("Notification" in window ? Notification.permission : "unsupported"),
-      token: () => { try { return localStorage.getItem("qt.pushToken") || ""; } catch { return ""; } },
-      async device(token) {
-        const s = await F.getDoc(F.doc(mine("devices"), token));
+      token: () => { try { return localStorage.getItem("qt.pushId") || ""; } catch { return ""; } },
+      async device(id) {
+        const s = await F.getDoc(F.doc(mine("devices"), id));
         return s.exists() ? s.data() : null;
       },
-      async register(vapidKey, prefs) {              // 권한 요청 + 토큰 발급 + 기기 등록
-        if ((await Notification.requestPermission()) !== "granted") throw new Error("알림 권한이 허용되지 않았습니다");
-        const M = await import(FB + "firebase-messaging.js");
-        const token = await M.getToken(M.getMessaging(app), { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready });
-        if (!token) throw new Error("알림 토큰을 받지 못했습니다");
-        await F.setDoc(F.doc(mine("devices"), token), { token, ...prefs, ua: navigator.userAgent.slice(0, 120), updatedAt: F.serverTimestamp() }, { merge: true });
-        try { localStorage.setItem("qt.pushToken", token); } catch { /* ignore */ }
-        return token;
+      async subscription(vapidKey) {                  // 현재 서버 키로 구독 (예전 키로 만든 구독이면 새로 만든다)
+        const reg = await navigator.serviceWorker.ready;
+        const want = urlB64ToBytes(vapidKey);
+        let sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          const have = sub.options && sub.options.applicationServerKey;
+          if (!have || !sameBytes(new Uint8Array(have), want)) { await sub.unsubscribe(); sub = null; }
+        }
+        return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: want });
       },
-      savePrefs: (token, prefs) => F.setDoc(F.doc(mine("devices"), token), { ...prefs, updatedAt: F.serverTimestamp() }, { merge: true }),
-      async refresh(vapidKey) {                      // 앱을 열 때 토큰이 바뀌었으면 새 토큰으로 옮긴다 (설정은 유지)
+      async register(vapidKey, prefs) {                // 권한 요청 + 구독 + 기기 등록
+        if ((await Notification.requestPermission()) !== "granted") throw new Error("알림 권한이 허용되지 않았습니다");
+        const j = (await this.subscription(vapidKey)).toJSON();
+        const id = await endpointId(j.endpoint);
+        await F.setDoc(F.doc(mine("devices"), id), { endpoint: j.endpoint, keys: j.keys, ...prefs, ua: navigator.userAgent.slice(0, 120), updatedAt: F.serverTimestamp() }, { merge: true });
+        try { localStorage.setItem("qt.pushId", id); } catch { /* ignore */ }
+        return id;
+      },
+      savePrefs: (id, prefs) => F.setDoc(F.doc(mine("devices"), id), { ...prefs, updatedAt: F.serverTimestamp() }, { merge: true }),
+      async refresh(vapidKey) {                        // 앱을 열 때 구독이 바뀌었으면 새 구독으로 옮긴다 (설정은 유지)
         const old = this.token();
         if (!old || Notification.permission !== "granted") return;
-        const M = await import(FB + "firebase-messaging.js");
-        const token = await M.getToken(M.getMessaging(app), { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready });
-        if (!token || token === old) return;
-        const prev = await this.device(old);
-        await F.setDoc(F.doc(mine("devices"), token), { ...(prev || {}), token, updatedAt: F.serverTimestamp() }, { merge: true });
-        await F.deleteDoc(F.doc(mine("devices"), old)).catch(() => {});
-        try { localStorage.setItem("qt.pushToken", token); } catch { /* ignore */ }
+        const j = (await this.subscription(vapidKey)).toJSON();
+        const id = await endpointId(j.endpoint);
+        const prev = id === old ? null : await this.device(old).catch(() => null);
+        await F.setDoc(F.doc(mine("devices"), id), { ...(prev || {}), endpoint: j.endpoint, keys: j.keys, updatedAt: F.serverTimestamp() }, { merge: true });
+        if (id !== old) {
+          await F.deleteDoc(F.doc(mine("devices"), old)).catch(() => {});
+          try { localStorage.setItem("qt.pushId", id); } catch { /* ignore */ }
+        }
       },
       async unregister() {
-        const token = this.token();
-        try { const M = await import(FB + "firebase-messaging.js"); await M.deleteToken(M.getMessaging(app)); } catch { /* 이미 만료 */ }
-        if (token) await F.deleteDoc(F.doc(mine("devices"), token)).catch(() => {});
-        try { localStorage.removeItem("qt.pushToken"); } catch { /* ignore */ }
+        const id = this.token();
+        try { const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } catch { /* ignore */ }
+        if (id) await F.deleteDoc(F.doc(mine("devices"), id)).catch(() => {});
+        try { localStorage.removeItem("qt.pushId"); } catch { /* ignore */ }
       },
     },
   };
