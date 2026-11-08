@@ -10,6 +10,8 @@ service cloud.firestore {
     // 스크래퍼(Admin SDK)만 쓰기 가능: 클라이언트는 읽기 전용
     match /qt/{date}        { allow read: if owner(); allow write: if false; }
     match /bible/{chapter}  { allow read: if owner(); allow write: if false; }
+    // 설교 라이브러리: 메일러(Admin SDK)만 쓰고, 앱은 본인만 읽는다
+    match /sermons/{videoId} { allow read: if owner(); allow write: if false; }
     match /users/{uid}/{document=**} {
       allow read, write: if owner() && request.auth.uid == uid;
     }

@@ -1,0 +1,24 @@
+name: import-library
+
+on:
+  workflow_dispatch:   # 수동 실행: library/*.json 을 앱용 Firestore(sermons)로 옮긴다. 여러 번 실행해도 안전
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: qt-app/scraper/requirements.txt
+      - run: pip install firebase-admin
+      - name: Import library into Firestore
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python scripts/import_library.py

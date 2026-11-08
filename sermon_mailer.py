@@ -15,11 +15,11 @@ import feedparser
 import requests
 
 CHANNELS = [
-    # library=True 인 채널만 library/ 와 대시보드에 저장한다
+    # library=True 인 채널만 library/, 대시보드, 앱(Firestore)에 저장한다
     {"id": "UCJe7PaggYL8ArlQPvvJbN3Q", "name": "청년교구", "footer": "분당우리교회 청년교구",
      "audience": "청년들", "library": True},  # @woori_youth
     {"id": "UCBh3Qv-rKu6ZDxEcrio70Hw", "name": "분당우리교회", "footer": "분당우리교회",
-     "audience": "성도들", "library": False},  # @BundangWooriChurch
+     "audience": "성도들", "library": True},  # @BundangWooriChurch (과거분 백필은 청년교구만)
 ]
 YOUTH = CHANNELS[0]
 EXCLUDE_KEYWORDS = ("새벽기도회",)  # 제목에 포함되면 메일을 보내지 않는다 (필요하면 여기에 추가)
@@ -109,12 +109,8 @@ def library_path(v):
     return LIBRARY_DIR / f"{v['published'].strftime('%Y-%m-%d')}_{v['id']}.json"
 
 
-def save_library(v, info):
-    """설교 하나당 JSON 파일 하나로 저장한다 (나중에 대시보드의 데이터가 된다)."""
-    if DRY_RUN or not v["channel"]["library"]:
-        return
-    LIBRARY_DIR.mkdir(exist_ok=True)
-    record = {
+def library_record(v, info):
+    return {
         "video_id": v["id"], "url": v["url"], "published": v["published"].isoformat(),
         "video_title": v["title"], "title": info.get("title", ""), "scripture": info.get("scripture", ""),
         "preacher": info.get("preacher", ""), "summary": info.get("summary", ""),
@@ -122,7 +118,46 @@ def save_library(v, info):
         "takeaways": info.get("takeaways", []), "tags": info.get("tags", []),
         "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg", "channel": v["channel"]["name"],
     }
+
+
+_firestore = None
+
+
+def firestore_db():
+    """Firebase 서비스 계정이 설정돼 있으면 Firestore 클라이언트를, 없으면 None을 돌려준다."""
+    global _firestore
+    raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+    if _firestore is None and raw:
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)))
+        _firestore = firestore.client()
+    return _firestore
+
+
+def save_to_firestore(record):
+    """앱이 읽는 sermons/{영상ID} 문서로 저장한다. 실패해도 메일 발송은 계속한다 (library/*.json 이 원본)."""
+    try:
+        db = firestore_db()
+        if db is None:
+            return
+        from firebase_admin import firestore
+
+        db.collection("sermons").document(record["video_id"]).set({**record, "updatedAt": firestore.SERVER_TIMESTAMP})
+    except Exception as e:
+        print(f"Firestore 저장 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+
+
+def save_library(v, info):
+    """설교 하나당 JSON 파일 하나로 저장하고(대시보드 데이터), 앱용 Firestore에도 저장한다."""
+    if DRY_RUN or not v["channel"]["library"]:
+        return
+    LIBRARY_DIR.mkdir(exist_ok=True)
+    record = library_record(v, info)
     library_path(v).write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    save_to_firestore(record)
 
 
 def fetch_via_rss(ch):

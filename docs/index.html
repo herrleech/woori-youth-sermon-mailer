@@ -27,7 +27,7 @@ header { padding: 32px 0 16px; }
 h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
 .sub { color: var(--muted); margin: 4px 0 0; font-size: .95rem; }
 .bar { display: grid; gap: 10px; grid-template-columns: 1fr; margin: 16px 0 8px; }
-@media (min-width: 720px) { .bar { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; } }
+@media (min-width: 720px) { .bar { grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; } }
 input, select { width: 100%; padding: 10px 12px; font: inherit; color: var(--ink); background: var(--card);
   border: 1px solid var(--line); border-radius: 10px; }
 input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -76,6 +76,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
     <select id="year" aria-label="연도"></select>
     <select id="month" aria-label="월"></select>
     <select id="preacher" aria-label="설교자"></select>
+    <select id="channel" aria-label="채널"></select>
     <select id="book" aria-label="성경 책"></select>
   </div>
   <div class="tags" id="tags" aria-label="주제 태그"></div>
@@ -94,10 +95,11 @@ const S = (window.SERMONS || []).map(s => {
   const kst = new Date(d.getTime() + 9 * 3600 * 1000);
   return { ...s, y: String(kst.getUTCFullYear()), m: String(kst.getUTCMonth() + 1),
     date: `${kst.getUTCFullYear()}.${String(kst.getUTCMonth() + 1).padStart(2, '0')}.${String(kst.getUTCDate()).padStart(2, '0')}`,
-    book: (s.scripture || '').trim().split(/\s+/)[0] || '' };
+    book: (s.scripture || '').trim().split(/\s+/)[0] || '',
+    channel: s.channel || '청년교구' };
 });
 const $ = id => document.getElementById(id);
-const state = { q: '', year: '', month: '', preacher: '', book: '', tag: '' };
+const state = { q: '', year: '', month: '', preacher: '', book: '', channel: '', tag: '' };
 const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uniq = f => [...new Set(S.map(f).filter(Boolean))];
 
@@ -109,6 +111,7 @@ fill('year', '전체 연도', uniq(s => s.y), (a, b) => b - a);
 fill('month', '전체 월', uniq(s => s.m), (a, b) => a - b);
 $('month').innerHTML = '<option value="">전체 월</option>' + Array.from({length: 12}, (_, i) => `<option value="${i+1}">${i+1}월</option>`).join('');
 fill('preacher', '전체 설교자', uniq(s => s.preacher), (a, b) => a.localeCompare(b, 'ko'));
+fill('channel', '전체 채널', uniq(s => s.channel), (a, b) => a.localeCompare(b, 'ko'));
 fill('book', '전체 성경', uniq(s => s.book), (a, b) => a.localeCompare(b, 'ko'));
 
 const tagCount = {};
@@ -121,6 +124,7 @@ function match(s) {
   if (state.month && s.m !== state.month) return false;
   if (state.preacher && s.preacher !== state.preacher) return false;
   if (state.book && s.book !== state.book) return false;
+  if (state.channel && s.channel !== state.channel) return false;
   if (state.tag && !(s.tags || []).includes(state.tag)) return false;
   if (state.q) {
     const hay = [s.title, s.scripture, s.preacher, s.summary, (s.tags || []).join(' '), (s.takeaways || []).join(' ')].join(' ').toLowerCase();
@@ -163,7 +167,7 @@ function open(id) {
 }
 
 $('q').addEventListener('input', e => { state.q = e.target.value.trim(); render(); });
-['year', 'month', 'preacher', 'book'].forEach(k => $(k).addEventListener('change', e => { state[k] = e.target.value; render(); }));
+['year', 'month', 'preacher', 'book', 'channel'].forEach(k => $(k).addEventListener('change', e => { state[k] = e.target.value; render(); }));
 $('tags').addEventListener('click', e => {
   const t = e.target.closest('.chip'); if (!t) return;
   state.tag = state.tag === t.dataset.tag ? '' : t.dataset.tag; render();
@@ -171,8 +175,8 @@ $('tags').addEventListener('click', e => {
 $('grid').addEventListener('click', e => { const c = e.target.closest('.card'); if (c) open(c.dataset.id); });
 $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').close(); });
 $('reset').addEventListener('click', () => {
-  Object.assign(state, { q: '', year: '', month: '', preacher: '', book: '', tag: '' });
-  $('q').value = ''; ['year', 'month', 'preacher', 'book'].forEach(k => $(k).value = ''); render();
+  Object.assign(state, { q: '', year: '', month: '', preacher: '', book: '', channel: '', tag: '' });
+  $('q').value = ''; ['year', 'month', 'preacher', 'book', 'channel'].forEach(k => $(k).value = ''); render();
 });
 render();
 </script>
