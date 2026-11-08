@@ -1,7 +1,13 @@
-// 앱 셸 캐시 (stale-while-revalidate). Firestore/Storage 요청은 가로채지 않는다.
-const CACHE = "qt-shell-v10";
-const CDN = ["cdn.jsdelivr.net", "www.gstatic.com", "i.ytimg.com"]; // i.ytimg.com: 설교 썸네일(한 번 본 것은 오프라인에서도 표시)
-const SHELL = ["./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest"];
+// 앱 셸 + 라이브러리를 미리 캐시해서 비행기 모드에서도 앱이 열린다. Firestore 요청은 가로채지 않는다
+// (Firestore 자체 오프라인 캐시가 데이터를 보관한다).
+const CACHE = "qt-shell-v11";
+const SHELL = [
+  "./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest",
+  "vendor/quill.js", "vendor/quill.snow.css",
+  "vendor/firebase/firebase-app.js", "vendor/firebase/firebase-auth.js", "vendor/firebase/firebase-firestore.js",
+  "icons/icon-192.png", "icons/icon-512.png", "icons/icon.svg",
+];
+const EXTERNAL = ["i.ytimg.com"]; // 설교 썸네일: 한 번 본 것은 오프라인에서도 표시
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,18 +20,21 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   const same = url.origin === location.origin;
-  if (!same && !CDN.includes(url.hostname)) return;
+  if (!same && !EXTERNAL.includes(url.hostname)) return;
+  const nav = req.mode === "navigate";
+  const stable = !same || url.pathname.includes("/vendor/"); // 바뀌지 않는 파일은 캐시 우선
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      const hit = await cache.match(req);
-      // 앱 파일은 네트워크 우선(배포 즉시 반영), 오프라인이면 캐시. CDN 라이브러리는 캐시 우선.
-      if (!same && hit) return hit;
+      const hit = await cache.match(req, { ignoreSearch: nav });
+      if (stable && hit) return hit;
+      // 앱 파일은 네트워크 우선(배포 즉시 반영), 오프라인이면 캐시
       try {
         const res = await fetch(req, same ? { cache: "no-cache" } : undefined);
         if (res.ok || res.type === "opaque") cache.put(req, res.clone());
         return res;
       } catch (err) {
         if (hit) return hit;
+        if (nav) { const shell = await cache.match("./", { ignoreSearch: true }); if (shell) return shell; }
         throw err;
       }
     })

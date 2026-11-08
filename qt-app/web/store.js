@@ -2,7 +2,7 @@
 import { firebaseConfig } from "./firebase-config.js";
 
 export const isFirebase = !!firebaseConfig.apiKey && !new URLSearchParams(location.search).has("demo"); // ?demo 로 열면 로컬 데모 모드
-const FB = "https://www.gstatic.com/firebasejs/10.14.1/";
+const FB = "./vendor/firebase/"; // Firebase JS SDK 10.14.1 (오프라인에서도 열리도록 앱에 포함)
 
 export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 

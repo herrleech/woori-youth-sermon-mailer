@@ -39,7 +39,7 @@ let sermons = [];
 let currentUser = null;
 const APP_VERSION = "2.0 (설교 라이브러리 통합)";
 const listeners = new Set();           // 데이터 변경 시 현재 뷰에 알림
-const notify = () => listeners.forEach((f) => f());
+const notify = () => { listeners.forEach((f) => f()); schedulePrefetch(); };
 const syncDot = $("#sync");
 const setSync = (s) => { syncDot.className = "sync " + s; };
 
@@ -664,7 +664,10 @@ async function openVerse(key, hlKey) {
     const first = $("#sheet-text .hl");
     if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center" }));
     sheetPlain = `${refLabel(r)} (새번역)\n` + parts.map(([v, t]) => `${v} ${t}`).join("\n");
-  } catch (e) { $("#sheet-text").textContent = "불러오지 못했습니다: " + e.message; }
+  } catch (e) {
+    $("#sheet-text").textContent = navigator.onLine ? "불러오지 못했습니다: " + e.message
+      : "오프라인이라 이 장은 아직 저장되어 있지 않습니다. 온라인일 때 한 번 열어보면 저장돼서 다음부터는 오프라인에서도 볼 수 있어요.";
+  }
 }
 $("#sheet-close").onclick = () => ($("#sheet").hidden = true);
 $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") $("#sheet").hidden = true; });
@@ -767,9 +770,47 @@ function openBackup() {
   };
 }
 
+// ───────────── 오프라인 준비: 자주 보는 말씀 본문 미리 받기 ─────────────
+// QT·설교·노트·QT 데이터는 Firestore 구독이 통째로 오프라인 캐시에 쌓인다. 새번역 본문(장 단위)은 열어본 것만 캐시되므로,
+// 최근 QT/설교/노트에 나온 장을 온라인일 때 조용히 미리 받아 둔다. (읽기 횟수는 무료 한도에 비해 아주 작다)
+const prefetched = new Set((() => { try { return JSON.parse(ls.get("qt.prefetched", "[]")); } catch { return []; } })());
+let prefetchTimer = null;
+let prefetching = false;
+function schedulePrefetch() {
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(prefetchChapters, 5000);  // 데이터가 잠잠해진 뒤에
+}
+async function prefetchChapters() {
+  if (prefetching || !isFirebase || !navigator.onLine || !store) return;
+  const keys = new Set();
+  const add = (text) => parsePassage(text || "").forEach((k) => { const r = decodeRef(k); if (r) keys.add(`${r.book.no}_${r.ch}`); });
+  qtList.slice(0, 30).forEach((q) => { add(q.passage); add(q.verseRef); });
+  sermons.slice(0, 60).forEach((s) => add(s.scripture));
+  notes.forEach((n) => add(n.passage));
+  const todo = [...keys].filter((k) => !prefetched.has(k)).slice(0, 150);
+  if (!todo.length) return;
+  prefetching = true;
+  try {
+    for (let i = 0; i < todo.length; i += 4) {
+      if (!navigator.onLine) break;
+      await Promise.all(todo.slice(i, i + 4).map(async (k) => {
+        const [b, c] = k.split("_").map(Number);
+        await store.getChapter(b, c);        // 서버에서 읽으면 Firestore 오프라인 캐시에 저장된다
+        prefetched.add(k);
+      }));
+    }
+  } catch { /* 연결이 끊기면 다음 기회에 이어서 */ }
+  ls.set("qt.prefetched", JSON.stringify([...prefetched]));
+  prefetching = false;
+}
+
 // ───────────── 시작 ─────────────
 async function boot() {
   store = await getStore();
+  const setOnline = () => { const off = !navigator.onLine; document.body.classList.toggle("offline", off); $("#offline").hidden = !off; };
+  window.addEventListener("online", () => { setOnline(); toast("온라인으로 돌아왔습니다"); schedulePrefetch(); });
+  window.addEventListener("offline", () => { setOnline(); toast("오프라인입니다. 쓴 내용은 연결되면 자동으로 저장돼요"); });
+  setOnline();
   $("#btn-login").onclick = () => store.signIn().catch((e) => toast("로그인 실패: " + e.message));
   let unsubs = [];
   store.onAuth((user) => {

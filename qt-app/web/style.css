@@ -210,3 +210,9 @@ body.hide-tabs main { padding-bottom: 96px; }
 
 /* 한글 제목은 단어 단위로 줄바꿈 */
 .sermon h1, .scard h3, .note-title, .keymsg { word-break: keep-all; }
+
+/* ───── 오프라인 표시 ───── */
+.offbadge { margin-left: auto; font-size: 12px; background: #5a6b80; color: #fff; padding: 2px 10px; border-radius: 999px; }
+.offbadge:not([hidden]) + .sync { margin-left: 8px; }
+.offbadge[hidden] + .sync { margin-left: auto; }
+body.offline .sync { background: #9aa !important; }
