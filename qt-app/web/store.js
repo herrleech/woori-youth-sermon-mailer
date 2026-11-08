@@ -34,6 +34,7 @@ async function makeFirebase() {
     signIn: () => A.signInWithPopup(auth, new A.GoogleAuthProvider()),
     signOut: () => A.signOut(auth),
     subscribeQt: (cb) => sub(F.query(F.collection(db, "qt"), F.orderBy("date", "desc")), cb),
+    subscribeSermons: (cb) => sub(F.query(F.collection(db, "sermons"), F.orderBy("published", "desc")), cb), // 메일러가 채운다
     subscribeEntries: (cb) => sub(mine("qtEntries"), cb),
     subscribeNotes: (cb) => sub(mine("notes"), cb),
     saveEntry: (date, patch) =>
@@ -80,6 +81,10 @@ function makeLocal() {
         demoQt = d;
         cb(d);
       }).catch(() => cb([]));
+      return () => {};
+    },
+    subscribeSermons(cb) {
+      fetch("demo/sermons.json").then((r) => r.json()).then((d) => cb(d.map((s) => ({ id: s.video_id, ...s })))).catch(() => cb([]));
       return () => {};
     },
     subscribeEntries: (cb) => reg(subs.entries, () => list(entries()), cb),

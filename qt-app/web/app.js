@@ -35,6 +35,9 @@ let store;
 let qtList = [];
 let entries = new Map();
 let notes = [];
+let sermons = [];
+let currentUser = null;
+const APP_VERSION = "2.0 (설교 라이브러리 통합)";
 const listeners = new Set();           // 데이터 변경 시 현재 뷰에 알림
 const notify = () => listeners.forEach((f) => f());
 const syncDot = $("#sync");
@@ -49,9 +52,14 @@ function route() {
   const h = location.hash.replace(/^#/, "") || "/";
   const [, a, b] = h.split("/");
   document.querySelectorAll("[data-nav]").forEach((n) => n.classList.toggle("active",
-    (n.dataset.nav === "home" && (!a || a === "qt")) || (n.dataset.nav === "notes" && (a === "notes" || a === "note"))));
+    (n.dataset.nav === "home" && (!a || a === "qt")) || (n.dataset.nav === "sermons" && (a === "sermons" || a === "sermon")) ||
+    (n.dataset.nav === "notes" && (a === "notes" || a === "note")) || (n.dataset.nav === "settings" && a === "settings")));
+  document.body.classList.toggle("hide-tabs", a === "qt" && !!b); // QT 상세는 하이라이트 도구 막대가 아래를 쓴다
   window.scrollTo(0, 0);
   if (a === "qt" && b) cleanup = renderDetail(decodeURIComponent(b));
+  else if (a === "sermons") cleanup = renderSermons();
+  else if (a === "sermon" && b) cleanup = renderSermon(decodeURIComponent(b));
+  else if (a === "settings") cleanup = renderSettings();
   else if (a === "notes") cleanup = renderNotes();
   else if (a === "note" && b) cleanup = renderNote(decodeURIComponent(b));
   else cleanup = renderHome();
@@ -282,6 +290,173 @@ function renderDetail(date) {
   };
 }
 
+// ───────────── 설교 라이브러리 ─────────────
+const KST_MS = 9 * 3600 * 1000;
+function prepSermons(list) {
+  return list.map((s) => {
+    const ymd = new Date(Date.parse(s.published) + KST_MS).toISOString().slice(0, 10);
+    return { ...s, _ymd: ymd, _y: ymd.slice(0, 4), _m: String(+ymd.slice(5, 7)),
+      _book: (s.scripture || "").trim().split(/\s+/)[0] || "", channel: s.channel || "청년교구" };
+  }).sort((a, b) => (a.published < b.published ? 1 : -1));
+}
+const sfilter = { q: "", year: "", month: "", channel: "", preacher: "", book: "", tag: "", open: false };
+function smatch(s) {
+  if (sfilter.year && s._y !== sfilter.year) return false;
+  if (sfilter.month && s._m !== sfilter.month) return false;
+  if (sfilter.channel && s.channel !== sfilter.channel) return false;
+  if (sfilter.preacher && s.preacher !== sfilter.preacher) return false;
+  if (sfilter.book && s._book !== sfilter.book) return false;
+  if (sfilter.tag && !(s.tags || []).includes(sfilter.tag)) return false;
+  const q = sfilter.q.trim().toLowerCase();
+  if (q) {
+    const hay = [s.title, s.scripture, s.preacher, s.channel, s.summary, s.key_message, (s.tags || []).join(" "),
+      (s.takeaways || []).join(" "), (s.points || []).map((p) => `${p.heading} ${p.body}`).join(" ")].join(" ").toLowerCase();
+    if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+const uniqSorted = (arr, cmp) => [...new Set(arr.filter(Boolean))].sort(cmp);
+const byKo = (a, b) => a.localeCompare(b, "ko");
+
+function renderSermons() {
+  view.innerHTML = `
+    <div class="bar">
+      <input id="s-q" class="grow" type="search" placeholder="제목·본문·설교자·내용 검색" value="${esc(sfilter.q)}">
+      <button id="s-toggle" class="btn small ${sfilter.open ? "on" : ""}">필터</button>
+    </div>
+    <div id="s-filters" class="filters ${sfilter.open ? "open" : ""}">
+      <label>연도<select id="s-year"></select></label>
+      <label>월<select id="s-month"></select></label>
+      <label>채널<select id="s-channel"></select></label>
+      <label>설교자<select id="s-preacher"></select></label>
+      <label>성경<select id="s-book"></select></label>
+      <button id="s-reset" class="btn small" style="align-self:end">초기화</button>
+    </div>
+    <div id="s-tags" class="tagrow"></div>
+    <div id="s-count" class="count"></div>
+    <div id="s-cards" class="scards"></div>`;
+  const SEL = { year: ["연도", () => uniqSorted(sermons.map((s) => s._y), (a, b) => b - a)],
+    month: ["월", () => Array.from({ length: 12 }, (_, i) => String(i + 1))],
+    channel: ["채널", () => uniqSorted(sermons.map((s) => s.channel), byKo)],
+    preacher: ["설교자", () => uniqSorted(sermons.map((s) => s.preacher), byKo)],
+    book: ["성경", () => uniqSorted(sermons.map((s) => s._book), byKo)] };
+  const drawOptions = () => {
+    for (const [k, [label, vals]] of Object.entries(SEL)) {
+      const el = $("#s-" + k);
+      el.innerHTML = `<option value="">전체 ${label}</option>` + vals().map((v) => `<option value="${esc(v)}">${esc(k === "month" ? v + "월" : v)}</option>`).join("");
+      el.value = sfilter[k];
+    }
+    const counts = {};
+    sermons.forEach((s) => (s.tags || []).forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
+    const tags = Object.entries(counts).sort((a, b) => b[1] - a[1] || byKo(a[0], b[0])).slice(0, 40);
+    $("#s-tags").innerHTML = tags.map(([t, n]) => `<button class="chip ${sfilter.tag === t ? "on" : ""}" data-tag="${esc(t)}">${esc(t)} ${n}</button>`).join("");
+  };
+  const drawList = () => {
+    const rows = sermons.filter(smatch);
+    $("#s-count").textContent = `${rows.length}편 / 전체 ${sermons.length}편`;
+    $("#s-cards").innerHTML = rows.length ? rows.map((s) => {
+      const lead = s.key_message || (s.summary || "").replace(/\s+/g, " ").slice(0, 90);
+      return `<a class="scard" href="#/sermon/${encodeURIComponent(s.id)}">
+        <div class="thumbwrap"><img loading="lazy" src="${esc(s.thumbnail || "")}" alt="" onerror="this.style.display='none'"></div>
+        <div class="body"><div class="date">${fmtDate(s._ymd)} · ${esc(s.channel)}</div><h3>${esc(s.title)}</h3>
+        <div class="ref">${esc(s.scripture)} · ${esc(s.preacher)}</div><p class="sum">${esc(lead)}</p>
+        <div class="mini">${(s.tags || []).map((t) => `<span>${esc(t)}</span>`).join("")}</div></div></a>`;
+    }).join("") : `<div class="empty">${sermons.length ? "조건에 맞는 설교가 없습니다" : "아직 저장된 설교가 없습니다"}</div>`;
+  };
+  const refresh = () => { drawOptions(); drawList(); };
+  $("#s-q").addEventListener("input", (e) => { sfilter.q = e.target.value; drawList(); });
+  Object.keys(SEL).forEach((k) => $("#s-" + k).addEventListener("change", (e) => { sfilter[k] = e.target.value; drawList(); }));
+  $("#s-toggle").onclick = (e) => { sfilter.open = !sfilter.open; $("#s-filters").classList.toggle("open", sfilter.open); e.target.classList.toggle("on", sfilter.open); };
+  $("#s-tags").addEventListener("click", (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    sfilter.tag = sfilter.tag === c.dataset.tag ? "" : c.dataset.tag; drawOptions(); drawList();
+  });
+  $("#s-reset").onclick = () => { Object.assign(sfilter, { q: "", year: "", month: "", channel: "", preacher: "", book: "", tag: "" }); $("#s-q").value = ""; refresh(); };
+  listeners.add(refresh);
+  refresh();
+  return () => listeners.delete(refresh);
+}
+
+function renderSermon(id) {
+  const idx = sermons.findIndex((x) => x.id === id);
+  const s = sermons[idx];
+  if (!s) {
+    view.innerHTML = `<div class="empty">${sermons.length ? "해당 설교를 찾을 수 없습니다" : "불러오는 중…"}<br><a href="#/sermons">목록으로</a></div>`;
+    const retry = () => { if (sermons.find((x) => x.id === id)) route(); };
+    listeners.add(retry);
+    return () => listeners.delete(retry);
+  }
+  const older = sermons[idx + 1], newer = sermons[idx - 1];
+  const nav = (x, label) => x ? `<a class="btn small" href="#/sermon/${encodeURIComponent(x.id)}">${label}</a>` : "";
+  const paras = (s.summary || "").split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+  const body = s.points && s.points.length
+    ? (s.key_message ? `<div class="keymsg">${esc(s.key_message)}</div>` : "") +
+      s.points.map((p, i) => `<h3 class="pt">${i + 1}. ${esc(p.heading)}</h3><p class="ptb">${esc(p.body)}</p>`).join("")
+    : paras.map((x) => `<p class="ptb">${esc(x).replace(/\n/g, "<br>")}</p>`).join("");
+  view.innerHTML = `
+    <div class="detail sermon">
+      <div class="page-head">
+        <a class="btn small" href="#/sermons">← 목록</a>
+        <span class="date">${fmtDate(s._ymd)} · ${esc(s.channel)}</span>
+        <span style="margin-left:auto;display:flex;gap:6px">${nav(older, "‹ 이전")}${nav(newer, "다음 ›")}</span>
+      </div>
+      <a class="bigthumb" href="${esc(s.url)}" target="_blank" rel="noopener"><img src="${esc(s.thumbnail || "")}" alt="" onerror="this.parentNode.style.display='none'"><span class="play">▶</span></a>
+      <h1>${esc(s.title)}</h1>
+      <div class="ref">${refBtn(s.scripture)} · ${esc(s.preacher)}</div>
+      <section class="sec"><h2>설교 요약</h2>${body}</section>
+      ${(s.takeaways || []).length ? `<section class="sec"><h2>적용 포인트</h2><ul class="tk">${s.takeaways.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></section>` : ""}
+      ${(s.tags || []).length ? `<div class="tagrow">${s.tags.map((t) => `<button class="chip" data-tag="${esc(t)}">#${esc(t)}</button>`).join("")}</div>` : ""}
+      <div class="actions">
+        <a class="btn" href="${esc(s.url)}" target="_blank" rel="noopener">▶ 영상 보기</a>
+        <button id="s-note" class="btn primary"></button>
+      </div>
+    </div>`;
+  view.querySelectorAll(".reflink").forEach((b) => b.addEventListener("click", () => openVerse(b.dataset.ref, b.dataset.hl)));
+  view.querySelectorAll(".tagrow .chip").forEach((c) => c.addEventListener("click", () => {
+    Object.assign(sfilter, { tag: c.dataset.tag, open: false }); location.hash = "#/sermons";
+  }));
+  const noteBtn = $("#s-note");
+  const drawBtn = () => { noteBtn.textContent = notes.some((n) => n.sermonId === s.video_id) ? "✎ 내 노트 열기" : "✎ 노트 쓰기"; };
+  noteBtn.onclick = () => openNoteForSermon(s);
+  drawBtn();
+  listeners.add(drawBtn);
+  return () => listeners.delete(drawBtn);
+}
+
+// 설교에서 바로 노트 쓰기: 설교 하나당 노트 하나(sermon_<영상ID>). 오프라인에서도 막히지 않도록 저장을 기다리지 않는다.
+function openNoteForSermon(s) {
+  const linked = notes.find((n) => n.sermonId === s.video_id);
+  if (linked) { location.hash = "#/note/" + encodeURIComponent(linked.id); return; }
+  const nid = "sermon_" + s.video_id;
+  store.saveNote(nid, { title: s.title, passage: s.scripture || "", sermonDate: s._ymd, sermonId: s.video_id,
+    delta: JSON.stringify({ ops: [{ insert: "\n" }] }), preview: "" })
+    .catch((e) => toast("노트를 만들지 못했습니다: " + e.message));
+  location.hash = "#/note/" + encodeURIComponent(nid);
+}
+
+// ───────────── 설정 ─────────────
+function renderSettings() {
+  view.innerHTML = `
+    <div class="settings">
+      <section class="sec"><h2>계정</h2>
+        <div class="txt">${esc((currentUser && (currentUser.email || currentUser.name)) || "")}${isFirebase ? "" : " (로컬 데모 모드)"}</div>
+        ${isFirebase ? `<p><button id="st-logout" class="btn">로그아웃</button></p>` : ""}</section>
+      <section class="sec"><h2>백업</h2>
+        <p class="hint">내 노트와 QT 기록을 JSON 파일로 저장하거나 가져옵니다.</p>
+        <button id="st-backup" class="btn">⇅ 백업 · 가져오기</button></section>
+      <section class="sec"><h2>알림</h2>
+        <p class="hint">새 설교 · 매일 QT 알림은 다음 업데이트에서 추가됩니다.</p></section>
+      <section class="sec"><h2>데이터</h2>
+        <div id="st-counts" class="txt"></div>
+        <div class="hint">앱 버전 ${esc(APP_VERSION)}</div></section>
+    </div>`;
+  const draw = () => { $("#st-counts").textContent = `QT ${qtList.length}개 · 설교 ${sermons.length}편 · 노트 ${notes.length}개`; };
+  $("#st-backup").onclick = openBackup;
+  const lo = $("#st-logout"); if (lo) lo.onclick = () => store.signOut();
+  listeners.add(draw); draw();
+  return () => listeners.delete(draw);
+}
+
 // ───────────── 설교 메모 목록 ─────────────
 let noteQ = "";
 function renderNotes() {
@@ -298,7 +473,7 @@ function renderNotes() {
     $("#n-count").textContent = `${rows.length}개`;
     $("#n-list").innerHTML = rows.length ? rows.map((n) => `<a class="card" href="#/note/${n.id}">
       <div class="meta"><div class="date">${noteDate(n) ? fmtDate(noteDate(n)) : ""}</div></div>
-      <div class="body"><h3>${esc(n.title || "제목 없음")}</h3>${n.passage ? `<div class="ref">${esc(n.passage)}</div>` : ""}<p class="sum">${esc(n.preview || "")}</p></div></a>`).join("")
+      <div class="body">${n.sermonId ? `<span class="done">📺 설교 연결</span>` : ""}<h3>${esc(n.title || "제목 없음")}</h3>${n.passage ? `<div class="ref">${esc(n.passage)}</div>` : ""}<p class="sum">${esc(n.preview || "")}</p></div></a>`).join("")
       : `<div class="empty">설교 메모가 없습니다. 새 메모를 만들어 보세요.</div>`;
   };
   $("#n-q").addEventListener("input", (e) => { noteQ = e.target.value; draw(); });
@@ -341,6 +516,7 @@ function renderNote(id) {
       <input id="n-passage" class="passage-input" placeholder="본문 (예: 요3:16-18 / 롬8 / 시편 23편)" maxlength="200">
       <span id="n-chips" class="chips"></span>
     </div>
+    <div id="n-link" class="linkbar" hidden></div>
     <div id="editor-wrap">
       <div id="toolbar">
         <span class="ql-formats">
@@ -437,6 +613,9 @@ function renderNote(id) {
   const pull = () => {
     const n = notes.find((x) => x.id === id);
     if (!n) return;
+    const linkedSermon = n.sermonId && sermons.find((x) => x.id === n.sermonId);
+    $("#n-link").hidden = !linkedSermon;
+    if (linkedSermon) $("#n-link").innerHTML = `📺 연결된 설교 · <a href="#/sermon/${encodeURIComponent(linkedSermon.id)}">${esc(linkedSermon.title)}</a> (${esc(linkedSermon.preacher)})`;
     if (n.title !== undefined && !dirty && document.activeElement !== titleEl) titleEl.value = n.title || "";
     if (!dirty && document.activeElement !== dateEl && dateEl.value !== noteDate(n)) dateEl.value = noteDate(n) || dateEl.value;
     if (!dirty && document.activeElement !== passEl && passEl.value !== (n.passage || "")) { passEl.value = n.passage || ""; shown = passEl.value; drawChips(); }
@@ -499,7 +678,7 @@ function exportData() {
     notes: notes.map((n) => {
       let delta = null;
       try { delta = JSON.parse(n.delta); } catch { /* 빈 메모 */ }
-      return { id: n.id, title: n.title || "", passage: n.passage || "", sermonDate: noteDate(n), delta, updatedAt: ts(n.updatedAt) || null };
+      return { id: n.id, title: n.title || "", passage: n.passage || "", sermonDate: noteDate(n), sermonId: n.sermonId || "", delta, updatedAt: ts(n.updatedAt) || null };
     }),
     qtEntries: [...entries.values()].map((e) => ({
       date: e.id, highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "", updatedAt: ts(e.updatedAt) || null,
@@ -547,7 +726,7 @@ function normalizeImport(json) {
     const sermonDate = typeof dv === "string" && /^\d{4}-\d{2}-\d{2}/.test(dv) ? dv.slice(0, 10) : toMs(dv) ? ymd(new Date(toMs(dv))) : "";
     const plain = (delta.ops || []).map((o) => (typeof o.insert === "string" ? o.insert : "")).join("");
     const id = String(n.id || "imp_" + hash(title + "|" + passage + "|" + plain.slice(0, 300)));
-    return { id, patch: { title, passage, sermonDate, delta: JSON.stringify(delta), preview: plain.replace(/\s+/g, " ").trim().slice(0, 140) }, at };
+    return { id, patch: { title, passage, sermonDate, ...(n.sermonId ? { sermonId: String(n.sermonId) } : {}), delta: JSON.stringify(delta), preview: plain.replace(/\s+/g, " ").trim().slice(0, 140) }, at };
   });
   const outEntries = rawEntries.filter((e) => e && /^\d{4}-\d{2}-\d{2}$/.test(e.date || e.id || ""))
     .map((e) => ({ date: e.date || e.id, patch: { highlights: e.highlights || [], godMessage: e.godMessage || "", application: e.application || "" } }));
@@ -592,19 +771,18 @@ function openBackup() {
 async function boot() {
   store = await getStore();
   $("#btn-login").onclick = () => store.signIn().catch((e) => toast("로그인 실패: " + e.message));
-  $("#btn-logout").onclick = () => store.signOut();
-  $("#btn-backup").onclick = openBackup;
   let unsubs = [];
   store.onAuth((user) => {
     unsubs.forEach((u) => u && u()); unsubs = [];
+    currentUser = user;
     $("#login").hidden = !!user;
     $("#app").hidden = !user;
-    $("#btn-logout").hidden = !isFirebase;
     if (!user) return;
     setSync("ok");
     unsubs.push(store.subscribeQt((l) => { qtList = [...l].sort((a, b) => (a.date < b.date ? 1 : -1)); notify(); }));
     unsubs.push(store.subscribeEntries((l) => { entries = new Map(l.map((e) => [e.id, e])); notify(); }));
     unsubs.push(store.subscribeNotes((l) => { notes = l; notify(); }));
+    unsubs.push(store.subscribeSermons((l) => { sermons = prepSermons(l); notify(); }));
     route();
   });
 }

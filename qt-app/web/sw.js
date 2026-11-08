@@ -1,6 +1,6 @@
 // 앱 셸 캐시 (stale-while-revalidate). Firestore/Storage 요청은 가로채지 않는다.
-const CACHE = "qt-shell-v9";
-const CDN = ["cdn.jsdelivr.net", "www.gstatic.com"];
+const CACHE = "qt-shell-v10";
+const CDN = ["cdn.jsdelivr.net", "www.gstatic.com", "i.ytimg.com"]; // i.ytimg.com: 설교 썸네일(한 번 본 것은 오프라인에서도 표시)
 const SHELL = ["./", "index.html", "style.css", "app.js", "store.js", "bible.js", "firebase-config.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

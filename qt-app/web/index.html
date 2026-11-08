@@ -20,15 +20,15 @@
 <div id="app" hidden>
   <header class="top">
     <a class="brand" href="#/">한 구절 묵상</a>
-    <nav>
-      <a href="#/" data-nav="home">QT</a>
-      <a href="#/notes" data-nav="notes">설교 메모</a>
-    </nav>
-    <span id="sync" class="sync" title="동기화 상태"></span>
-    <button id="btn-backup" class="btn ghost small" title="백업 · 가져오기/내보내기">⇅</button>
-    <button id="btn-logout" class="btn ghost small" title="로그아웃">⎋</button>
+    <span id="sync" class="sync" title="동기화 상태" style="margin-left:auto"></span>
   </header>
   <main id="view"></main>
+  <nav class="tabbar" aria-label="메뉴">
+    <a href="#/" data-nav="home"><span class="ic">📖</span>오늘</a>
+    <a href="#/sermons" data-nav="sermons"><span class="ic">🎙</span>설교</a>
+    <a href="#/notes" data-nav="notes"><span class="ic">✎</span>노트</a>
+    <a href="#/settings" data-nav="settings"><span class="ic">⚙</span>설정</a>
+  </nav>
 </div>
 <div id="sheet" class="sheet" hidden>
   <div class="sheet-body">
