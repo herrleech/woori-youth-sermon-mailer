@@ -1,14 +1,11 @@
-"""분당우리교회 유튜브 채널(청년교구 + 본채널)에 새 설교가 올라오면 요약해서 설교마다 이메일로 보낸다."""
+"""분당우리교회 유튜브 채널(청년교구 + 본채널)에 새 설교가 올라오면 요약해서 앱 라이브러리(Firestore)에 저장하고 푸시 알림을 보낸다."""
 import html
 import json
 import os
 import re
-import smtplib
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 
 import feedparser
@@ -22,13 +19,13 @@ CHANNELS = [
      "audience": "성도들", "library": True},  # @BundangWooriChurch (과거분 백필은 청년교구만)
 ]
 YOUTH = CHANNELS[0]
-EXCLUDE_KEYWORDS = ("새벽기도회",)  # 제목에 포함되면 메일을 보내지 않는다 (필요하면 여기에 추가)
+EXCLUDE_KEYWORDS = ("새벽기도회",)  # 제목에 포함되면 처리하지 않는다 (필요하면 여기에 추가)
 LIVE_PATTERN =re.compile(r"생방송|라이브|🔴|\blive\b", re.I)  # 방송 중인 영상은 요약할 수 없다
 SEEN_FILE = Path(__file__).with_name("seen.json")
 LIBRARY_DIR = Path(__file__).with_name("library")
 SERMON_KEYWORDS = ("목사", "전도사", "강도사")  # 찬양 영상 등은 제외
 GIVE_UP_AFTER = timedelta(days=2)  # 요약이 계속 실패하면 이 시간 후 간단 안내만 보낸다
-# 새 설교 메일은 조금 끈질기게(영상당 최대 약 2분 x 모델 수), 백필은 한 번만 시도하고 다음 날 다시 한다
+# 새 설교는 조금 끈질기게(영상당 최대 약 2분 x 모델 수), 백필은 한 번만 시도하고 다음 날 다시 한다
 RETRY_WAITS = (0,) if os.environ.get("BACKFILL_ONLY") == "1" else (0, 10)
 CALL_TIMEOUT_MS = 90_000  # Gemini 호출 한 번당 최대 90초
 MAX_AGE = timedelta(days=3)  # 이보다 오래된 영상은 보내지 않고 기록만 한다
@@ -138,7 +135,7 @@ def firestore_db():
 
 
 def save_to_firestore(record):
-    """앱이 읽는 sermons/{영상ID} 문서로 저장한다. 실패해도 메일 발송은 계속한다 (library/*.json 이 원본)."""
+    """앱이 읽는 sermons/{영상ID} 문서로 저장한다. 실패해도 나머지 처리는 계속한다 (library/*.json 이 원본)."""
     try:
         db = firestore_db()
         if db is None:
@@ -148,11 +145,11 @@ def save_to_firestore(record):
         db.collection("sermons").document(record["video_id"]).set({**record, "updatedAt": firestore.SERVER_TIMESTAMP})
         print(f"Firestore 저장 완료: {record['video_id']}")
     except Exception as e:
-        print(f"Firestore 저장 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+        print(f"Firestore 저장 실패(계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
 
 
 def push_new_sermon(v, info):
-    """새 설교를 앱 알림으로도 알린다 (알림을 켜둔 기기에만). 실패해도 메일 발송은 계속한다."""
+    """새 설교를 앱 알림으로도 알린다 (알림을 켜둔 기기에만). 실패해도 나머지 처리는 계속한다."""
     if DRY_RUN or not v["channel"]["library"] or not os.environ.get("WEBPUSH_VAPID_PRIVATE"):
         return
     try:
@@ -168,7 +165,7 @@ def push_new_sermon(v, info):
                                           body, f"#/sermon/{v['id']}", tag=v["id"])
         print(f"푸시 알림: 성공 {sent}, 실패 {failed}, 만료 정리 {removed}")
     except Exception as e:
-        print(f"푸시 알림 실패(메일은 계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
+        print(f"푸시 알림 실패(계속 진행): {type(e).__name__}: {str(e)[:150]}", file=sys.stderr)
 
 
 def save_library(v, info):
@@ -321,73 +318,9 @@ def summarize(video_id, url, ch, title, description):
     return None
 
 
-def render_email(info, url, published, ch):
-    esc = html.escape
-    h3 = "margin:28px 0 10px;font-size:17px;color:#1f3d34"
-    takeaways = "".join(f'<li style="margin:0 0 8px">{esc(t)}</li>' for t in info.get("takeaways", []))
-    if info.get("points"):  # 핵심 메시지 상자 + 요점마다 소제목/본문 (문단 사이를 넉넉히 띄운다)
-        key = info.get("key_message", "")
-        summary_html = (f'<div style="background:#eef4f1;border-left:4px solid #2f5d50;padding:14px 16px;'
-                        f'margin:0 0 8px;font-size:16px;font-weight:bold">{esc(key)}</div>' if key else "")
-        summary_html += "".join(
-            f'<h4 style="margin:22px 0 6px;font-size:16px">{i}. {esc(p["heading"])}</h4>'
-            f'<p style="margin:0">{esc(p["body"])}</p>' if p["heading"] else
-            f'<p style="margin:14px 0 0">{i}. {esc(p["body"])}</p>'
-            for i, p in enumerate(info["points"], 1))
-    else:  # 요점 구조가 없는 요약(요약 실패 안내 등)은 빈 줄 기준으로 문단을 나눈다
-        paras = [p.strip() for p in info.get("summary", "").split("\n\n") if p.strip()]
-        summary_html = "".join(f'<p style="margin:0 0 14px">{esc(p).replace(chr(10), "<br>")}</p>' for p in paras)
-    body = f"""
-<div style="font-family:'Malgun Gothic',sans-serif;max-width:640px;margin:auto;padding:16px 18px;line-height:1.85;font-size:15px;color:#222;background:#ffffff">
-  <h2 style="margin:0 0 6px;font-size:22px;line-height:1.4">{esc(info.get('title', ''))}</h2>
-  <p style="margin:0;color:#555">📖 {esc(info.get('scripture', ''))} &nbsp;|&nbsp; 🎤 {esc(info.get('preacher', ''))}</p>
-  <p style="margin:4px 0 16px;color:#888;font-size:13px">{published}</p>
-  <p style="margin:0"><a href="{url}" style="background:#c00;color:#fff;padding:9px 16px;text-decoration:none;border-radius:4px;display:inline-block">▶ 영상 보기</a></p>
-  <h3 style="{h3}">설교 요약</h3>{summary_html}
-  {f'<h3 style="{h3}">적용 포인트</h3><ul style="margin:0;padding-left:22px">{takeaways}</ul>' if takeaways else ''}
-  <hr style="margin:32px 0 12px;border:0;border-top:1px solid #ddd"><p style="color:#999;font-size:12px;margin:0">{ch['footer']} 유튜브 새 설교 자동 알림 (AI 요약이라 부정확할 수 있어요)</p>
-</div>"""
-    text = (f"{info.get('title', '')}\n본문: {info.get('scripture', '')}\n설교자: {info.get('preacher', '')}\n"
-            f"{url}\n\n{info.get('summary', '')}\n")
-    return body, text
-
-
-def send_mail(subject, body_html, body_text):
-    if DRY_RUN:
-        print("=== DRY RUN (메일 발송 안 함) ===\n제목:", subject, "\n", body_text)
-        return
-    user, pw = os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASSWORD"]
-    to = [a.strip() for a in os.environ["MAIL_TO"].split(",") if a.strip()]
-    msg = MIMEMultipart("alternative")
-    msg["Subject"], msg["From"], msg["To"] = subject, user, ", ".join(to)
-    msg.attach(MIMEText(body_text, "plain", "utf-8"))
-    msg.attach(MIMEText(body_html, "html", "utf-8"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
-        s.login(user, pw)
-        s.sendmail(user, to, msg.as_string())
-
-
-def send_test(video_id):
-    """TEST_VIDEO=영상ID : 그 영상 하나만 요약해 메일을 보낸다. '보낸 영상' 기록과 라이브러리는 건드리지 않는다."""
-    videos = fetch_videos() or []
-    v = next((x for x in videos if x["id"] == video_id), None)
-    if v is None:
-        print(f"테스트 영상 {video_id} 을(를) 최근 영상 목록에서 찾지 못했습니다.", file=sys.stderr)
-        sys.exit(1)
-    ch = v["channel"]
-    info = summarize(v["id"], v["url"], ch, v["title"], v["description"])
-    if info is None:
-        print(f"테스트 영상 요약 실패: {v['title']}", file=sys.stderr)
-        sys.exit(1)
-    kst = timezone(timedelta(hours=9))
-    body_html, body_text = render_email(info, v["url"], v["published"].astimezone(kst).strftime("%Y-%m-%d %H:%M"), ch)
-    send_mail(f"[테스트] [{ch['name']} 새 설교] {info.get('title', v['title'])}", body_html, body_text)
-    print(f"테스트 발송 완료: {v['title']}")
-
-
 def add_to_library(ids):
-    """LIBRARY_VIDEOS=id1,id2 : 메일은 보내지 않고 그 영상들을 요약해 라이브러리/앱에만 저장한다.
-    (이미 메일이 나갔거나 과거에 기록만 한 설교를 보충할 때 쓴다. 최근 영상 목록에 있는 것만 가능)"""
+    """LIBRARY_VIDEOS=id1,id2 : 푸시 알림 없이 그 영상들을 요약해 라이브러리/앱에만 저장한다.
+    (처리에 실패했거나 과거에 기록만 한 설교를 보충할 때 쓴다. 최근 영상 목록에 있는 것만 가능)"""
     videos = {v["id"]: v for v in (fetch_videos() or [])}
     bad = 0
     for vid in ids:
@@ -407,9 +340,6 @@ def main():
     if os.environ.get("LIBRARY_VIDEOS", "").strip():
         add_to_library([x.strip() for x in os.environ["LIBRARY_VIDEOS"].split(",") if x.strip()])
         return
-    if os.environ.get("TEST_VIDEO", "").strip():
-        send_test(os.environ["TEST_VIDEO"].strip())
-        return
     if os.environ.get("BACKFILL_ONLY") == "1":
         backfill()
         return
@@ -419,13 +349,13 @@ def main():
         return
     seen = load_seen()
 
-    if seen is None:  # 첫 실행: 과거 영상은 보내지 않고 기록만 한다
+    if seen is None:  # 첫 실행: 과거 영상은 처리하지 않고 기록만 한다
         save_seen({v["id"] for v in videos})
         print(f"첫 실행: 기존 영상 {len(videos)}개를 기록만 했습니다.")
         return
     seen = set(seen)
 
-    for ch in CHANNELS:  # 새로 추가한 채널의 첫 확인: 과거 영상은 보내지 않고 기록만 한다
+    for ch in CHANNELS:  # 새로 추가한 채널의 첫 확인: 과거 영상은 처리하지 않고 기록만 한다
         ids = {v["id"] for v in videos if v["channel"] is ch}
         if ids and not ids & seen:
             seen |= ids
@@ -434,7 +364,6 @@ def main():
                 save_seen(seen)
 
     now = datetime.now(timezone.utc)
-    kst = timezone(timedelta(hours=9))
     pending = sorted((v for v in videos if v["id"] not in seen), key=lambda v: v["published"])  # 오래된 것부터
     for v in pending:
         vid, url, title, published, ch = v["id"], v["url"], v["title"], v["published"], v["channel"]
@@ -447,17 +376,16 @@ def main():
             if now - published < GIVE_UP_AFTER:
                 print(f"요약 실패, 다음 실행에서 재시도: {title}")
                 continue
-            info = {"title": title, "scripture": "-", "preacher": "-",
-                    "summary": "요약을 만들지 못했습니다. 영상 링크에서 확인해주세요.", "takeaways": []}
+            # 이틀이 지나도 요약이 안 되면 포기하고 기록한다. 청년교구는 백필이 나중에 채우고,
+            # 그 밖의 영상은 LIBRARY_VIDEOS 로 수동 추가할 수 있다.
+            print(f"요약을 끝내 만들지 못해 건너뜁니다: {title}", file=sys.stderr)
         else:
             save_library(v, info)
             push_new_sermon(v, info)
-        body_html, body_text = render_email(info, url, published.astimezone(kst).strftime("%Y-%m-%d %H:%M"), ch)
-        send_mail(f"[{ch['name']} 새 설교] {info.get('title', title)}", body_html, body_text)
-        print(f"발송 완료: {title}")
+            print(f"저장 완료: {title}")
         seen.add(vid)
         if not DRY_RUN:
-            save_seen(seen)  # 실행이 중간에 취소돼도 이미 보낸 메일이 다시 가지 않도록 바로 기록
+            save_seen(seen)  # 실행이 중간에 취소돼도 처리한 영상이 다시 처리되지 않도록 바로 기록
 
     if not DRY_RUN:
         save_seen(seen)
@@ -465,7 +393,7 @@ def main():
 
 
 def backfill():
-    """부가 작업이라 오류가 나도 실행 전체를 실패로 만들지 않는다 (실패 알림 메일 방지)."""
+    """부가 작업이라 오류가 나도 실행 전체를 실패로 만들지 않는다 (GitHub 실패 알림 방지)."""
     try:
         _backfill()
     except Exception as e:
@@ -473,7 +401,7 @@ def backfill():
 
 
 def _backfill():
-    """BACKFILL=N 이면 라이브러리에 없는 지난 설교를 최대 N편 요약해 저장한다 (메일은 보내지 않음)."""
+    """BACKFILL=N 이면 라이브러리에 없는 지난 설교를 최대 N편 요약해 저장한다 (푸시 알림은 보내지 않음)."""
     limit = int(os.environ.get("BACKFILL", "0"))
     key = os.environ.get("YOUTUBE_API_KEY")
     if limit <= 0 or not key:

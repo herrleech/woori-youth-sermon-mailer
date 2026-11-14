@@ -9,12 +9,8 @@ on:
     - cron: "47 14 * * *"    # 23:47 KST
   workflow_dispatch:
     inputs:
-      test_video:
-        description: "테스트: 이 유튜브 영상 ID 하나만 메일로 보내본다 (기록은 건드리지 않음). 비워두면 평소처럼 실행"
-        required: false
-        default: ""
       library_videos:
-        description: "보충: 이 영상 ID(쉼표로 여러 개)를 메일 없이 요약해 라이브러리/앱에만 추가한다 (최근 영상 목록에 있는 것만)"
+        description: "보충: 이 영상 ID(쉼표로 여러 개)를 푸시 알림 없이 요약해 라이브러리/앱에만 추가한다 (최근 영상 목록에 있는 것만). 비워두면 평소처럼 새 설교 확인"
         required: false
         default: ""
 
@@ -36,18 +32,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Run mailer
+      - name: Check new sermons
         timeout-minutes: 25   # 이 단계가 시간 초과로 끊겨도 아래 저장 단계는 실행된다 (남은 설교는 다음 실행에서 처리)
         env:
-          TEST_VIDEO: ${{ github.event.inputs.test_video }}
           LIBRARY_VIDEOS: ${{ github.event.inputs.library_videos }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           WEBPUSH_VAPID_PRIVATE: ${{ secrets.WEBPUSH_VAPID_PRIVATE }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python sermon_mailer.py
       - name: Build dashboard data
         if: always()

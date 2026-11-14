@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: sermon-mailer   # 메일러/백필과 동시에 library 를 건드리지 않도록 같은 그룹
+  group: sermon-mailer   # 새 설교 확인/백필과 동시에 library 를 건드리지 않도록 같은 그룹 (이름은 그대로 둠)
   cancel-in-progress: false
 
 jobs:

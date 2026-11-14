@@ -43,7 +43,7 @@ async function makeFirebase() {
     signIn: () => A.signInWithPopup(auth, new A.GoogleAuthProvider()),
     signOut: () => A.signOut(auth),
     subscribeQt: (cb) => sub(F.query(F.collection(db, "qt"), F.orderBy("date", "desc")), cb),
-    subscribeSermons: (cb) => sub(F.query(F.collection(db, "sermons"), F.orderBy("published", "desc")), cb), // 메일러가 채운다
+    subscribeSermons: (cb) => sub(F.query(F.collection(db, "sermons"), F.orderBy("published", "desc")), cb), // 새 설교 확인 작업이 채운다
     subscribeEntries: (cb) => sub(mine("qtEntries"), cb),
     subscribeNotes: (cb) => sub(mine("notes"), cb),
     saveEntry: (date, patch) =>

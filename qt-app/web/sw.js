@@ -42,7 +42,7 @@ self.addEventListener("fetch", (e) => {
 });
 
 // ───── 푸시 알림 ─────
-// 서버(메일러/스케줄)가 FCM 으로 보낸 data 메시지를 받아 알림으로 보여준다. (알림 내용은 title/body/hash/tag)
+// 서버(새 설교 확인/스케줄)가 FCM 으로 보낸 data 메시지를 받아 알림으로 보여준다. (알림 내용은 title/body/hash/tag)
 self.addEventListener("push", (e) => {
   let d = {};
   try { const j = e.data ? e.data.json() : {}; d = j.data || j; } catch { d = { body: e.data ? e.data.text() : "" }; }
